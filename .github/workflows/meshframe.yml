@@ -1,0 +1,15 @@
+name: meshframe
+on:
+  push:
+    paths: ['MeshFrame/**', '.github/workflows/meshframe.yml']
+  pull_request:
+    paths: ['MeshFrame/**']
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cài Mono
+        run: sudo apt-get update && sudo apt-get install -y mono-mcs mono-runtime libmono-system-windows-forms4.0-cil unzip
+      - name: Test Core, build UI, build bộ ghi Tekla (2021 + 2025)
+        run: ./MeshFrame/ci/build.sh

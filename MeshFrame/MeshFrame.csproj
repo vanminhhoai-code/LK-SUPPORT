@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Không tham chiếu Tekla: cùng kiểu với BaoChe.FlashingDim.Module (Core) của Cover Tool.
+       Phần ghi vào model sẽ do app tích hợp cài IModelWriter. -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>Library</OutputType>
+    <AssemblyName>MeshFrame</AssemblyName>
+    <RootNamespace>MeshFrame</RootNamespace>
+    <LangVersion>7.3</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Tests/**" />
+    <Compile Remove="old/**" />
+    <Compile Remove="Tekla/**" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+  </ItemGroup>
+</Project>

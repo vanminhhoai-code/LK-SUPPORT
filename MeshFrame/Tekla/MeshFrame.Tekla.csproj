@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Bộ ghi vào Tekla. Biên dịch riêng cho từng phiên bản: truyền -p:TeklaBin=<thư mục chứa Tekla.Structures*.dll> -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>Library</OutputType>
+    <AssemblyName>MeshFrame.Tekla</AssemblyName>
+    <RootNamespace>MeshFrame.Tekla</RootNamespace>
+    <LangVersion>7.3</LangVersion>
+    <TeklaBin Condition="'$(TeklaBin)' == ''">C:\TeklaStructures\2025.0\bin</TeklaBin>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\Core\*.cs" />
+    <Reference Include="Tekla.Structures"><HintPath>$(TeklaBin)\Tekla.Structures.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Tekla.Structures.Model"><HintPath>$(TeklaBin)\Tekla.Structures.Model.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>
