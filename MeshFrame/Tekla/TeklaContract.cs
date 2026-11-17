@@ -9,10 +9,32 @@ namespace MeshFrame.Tekla
 {
     public static class TeklaContract
     {
-        /// <summary>Kiểm tra bản Tekla đang nạp theo ApiMembers. Trả về danh sách dòng thiếu/sai (rỗng = đủ).</summary>
-        public static List<string> VerifyLoaded(TeklaApi api)
+        // Thành viên TÙY CHỌN: thiếu thì app đã có dự phòng, không phải lỗi và không được làm phiền người dùng.
+        private static readonly string[] OptionalMarkers =
         {
-            return Verify(ApiMembers.Text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries), api.ModelAssembly, api.GeometryAssembly, api.CatalogAssembly);
+            "UI.Picker::PickPoint(System.String;Tekla.Structures.Geometry3d.Point)",   // thiếu trên 21.1 -> dùng PickPoint(chuỗi)
+            "UI.GraphicsDrawer::", "UI.Color"                                          // thiếu -> không vẽ đồ họa tạm, số đo hiện trên thanh trạng thái
+        };
+
+        public sealed class Report
+        {
+            public List<string> Required = new List<string>();   // thiếu hàm bắt buộc: chức năng sẽ lỗi
+            public List<string> Optional = new List<string>();   // thiếu hàm tùy chọn: đã có dự phòng
+        }
+
+        public static bool IsOptional(string line)
+        {
+            foreach (string m in OptionalMarkers) if (line.Contains(m)) return true;
+            return false;
+        }
+
+        /// <summary>Kiểm tra bản Tekla đang nạp theo ApiMembers, tách thiếu bắt buộc và thiếu tùy chọn.</summary>
+        public static Report VerifyLoaded(TeklaApi api)
+        {
+            var r = new Report();
+            foreach (string bad in Verify(ApiMembers.Text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries), api.ModelAssembly, api.GeometryAssembly, api.CatalogAssembly))
+                (IsOptional(bad) ? r.Optional : r.Required).Add(bad);
+            return r;
         }
 
         public static List<string> Verify(IEnumerable<string> lines, Assembly model, Assembly geo, Assembly cat)

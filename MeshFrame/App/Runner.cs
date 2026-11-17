@@ -36,19 +36,22 @@ namespace MeshFrame.App
             // Bản Tekla này có đủ hàm API MeshFrame cần không? (21.1 / 2020 có thể thiếu so với 2021 / 2025)
             Func<string> apiCheck = delegate
             {
-                List<string> missing = TeklaContract.VerifyLoaded(api);
+                TeklaContract.Report rep = TeklaContract.VerifyLoaded(api);
                 string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MeshFrame", "api-missing.txt");
-                if (missing.Count == 0) return "Tekla " + release + ": đủ mọi hàm API mà MeshFrame dùng.";
+                if (rep.Required.Count == 0 && rep.Optional.Count == 0) return "Tekla " + release + ": đủ mọi hàm API mà MeshFrame dùng.";
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
-                File.WriteAllLines(path, missing.ToArray());
-                var head = new List<string>(); for (int i = 0; i < Math.Min(8, missing.Count); i++) head.Add("• " + missing[i].Split(new[] { "   <--" }, StringSplitOptions.None)[0]);
-                return "Tekla " + release + " THIẾU " + missing.Count + " thành viên API mà MeshFrame dùng:\n\n" + string.Join("\n", head.ToArray()) + (missing.Count > 8 ? "\n..." : "")
-                       + "\n\nDanh sách đầy đủ: " + path + "\nGửi file này cho người hỗ trợ; chức năng liên quan có thể lỗi.";
+                var all = new List<string>(); all.AddRange(rep.Required.ConvertAll(x => "BẮT BUỘC: " + x)); all.AddRange(rep.Optional.ConvertAll(x => "tùy chọn (đã có dự phòng): " + x));
+                File.WriteAllLines(path, all.ToArray());
+                var head = new List<string>(); for (int i = 0; i < Math.Min(8, rep.Required.Count); i++) head.Add("• " + rep.Required[i].Split(new[] { "   <--" }, StringSplitOptions.None)[0]);
+                string text = rep.Required.Count > 0
+                    ? "Tekla " + release + " THIẾU " + rep.Required.Count + " hàm API BẮT BUỘC của MeshFrame:\n\n" + string.Join("\n", head.ToArray()) + (rep.Required.Count > 8 ? "\n..." : "") + "\n\nChi tiết: " + path + "\nGửi file này cho người hỗ trợ."
+                    : "Tekla " + release + ": đủ mọi hàm bắt buộc. Có " + rep.Optional.Count + " hàm tùy chọn không có trên bản này; app đã có dự phòng nên không ảnh hưởng (chi tiết: " + path + ").";
+                return rep.Required.Count > 0 ? "THIẾU|" + text : text;
             };
             try
             {
-                string startup = apiCheck();
-                if (startup.Contains("THIẾU")) MessageBox.Show(startup, title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                string startup = apiCheck();                                              // chỉ hỏi người dùng khi thiếu hàm BẮT BUỘC
+                if (startup.StartsWith("THIẾU|")) MessageBox.Show(startup.Substring(6), title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             catch (Exception) { }
 
@@ -78,7 +81,7 @@ namespace MeshFrame.App
                 dlg.Settings = SettingsStore.Load(SettingsPath);
                 dlg.PickHandler = pick;
                 dlg.SelectedObjectProbe = delegate { return TeklaProbe.DumpSelected(api); };
-                dlg.ApiCheckHandler = apiCheck;
+                dlg.ApiCheckHandler = delegate { string t = apiCheck(); return t.StartsWith("THIẾU|") ? t.Substring(6) : t; };
                 dlg.CreateHandler = delegate (MeshFrameSettings s, V3[] pts)
                 {
                     ServiceResult r = svc.Create(s, pts);

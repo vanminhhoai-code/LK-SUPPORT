@@ -23,9 +23,9 @@ static class WriterTests
         Check("[legacy] van ve du: 14 net + 9 nhan, du cac diem", Count("DrawLine") == 14 && CountStart("DrawText") == 9 && pr.Points[3].Y == 1600);
         Check("[legacy] loi nhac van co so do doan truoc + chu vi", FakeLog.Prompts.Count == 6 && FakeLog.Prompts[3].Contains("doan truoc 1000.0 mm") && FakeLog.Prompts[3].Contains("chu vi 4000.0 mm"));
         Check("[legacy] ChUA dung o diem 1 (loi cu: coi thieu ham la ket thuc)", pr.Picked > 1 && pr.StopReason != null && pr.StopReason.Contains("interrupted"));
-        var missing = TeklaContract.VerifyLoaded(api);
-        Check("[legacy] kiem tra API trong app bao DUNG thieu PickPoint(chuoi, diem)", missing.Count == 1 && missing[0].Contains("PickPoint"));
-        Console.WriteLine("legacy pass " + pass + " fail " + fail + "  (API thieu theo kiem tra: " + missing.Count + ")");
+        var rep = TeklaContract.VerifyLoaded(api);
+        Check("[legacy] thieu PickPoint(chuoi, diem) la TUY CHON: khong co ham bat buoc nao thieu -> khong hien canh bao luc khoi dong", rep.Required.Count == 0 && rep.Optional.Count == 1 && rep.Optional[0].Contains("PickPoint"));
+        Console.WriteLine("legacy pass " + pass + " fail " + fail + "  (thieu bat buoc " + rep.Required.Count + ", tuy chon " + rep.Optional.Count + ")");
         return fail == 0 ? 0 : 1;
     }
 
@@ -239,7 +239,9 @@ static class WriterTests
         Check("moi loi goi SDK qua Invoke", hooked > 50);
 
         // ---------------------------------------------------------------- hợp đồng ngay trong app + phân biệt lỗi API với ngắt pick
-        Check("kiem tra API trong app: SDK day du -> khong thieu gi", TeklaContract.VerifyLoaded(api).Count == 0);
+        var full = TeklaContract.VerifyLoaded(api);
+        Check("kiem tra API trong app: SDK day du -> khong thieu gi", full.Required.Count == 0 && full.Optional.Count == 0);
+        Check("ham tuy chon duoc nhan dien, ham bat buoc thi khong", TeklaContract.IsOptional("call Tekla.Structures.Model.UI.Picker::PickPoint(System.String;Tekla.Structures.Geometry3d.Point)") && TeklaContract.IsOptional("call Tekla.Structures.Model.UI.GraphicsDrawer::DrawText(x)") && !TeklaContract.IsOptional("call Tekla.Structures.Model.Beam::Insert()"));
         Check("IsApiError: thieu ham/kieu la loi API, nguoi dung ngat pick thi khong", TeklaPicker.IsApiError(new MissingMethodException("x")) && TeklaPicker.IsApiError(new MissingMemberException("x"))
               && TeklaPicker.IsApiError(new TypeLoadException("x")) && !TeklaPicker.IsApiError(new ApplicationException("User interrupted")));
 

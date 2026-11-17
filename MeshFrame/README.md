@@ -21,7 +21,7 @@ Một `MeshFrame.exe` cho **Tekla 21.1 / 2020 / 2025**: API Tekla nạp lúc ch�
 5. Bấm **Tạo khung trong Tekla**. Hộp thoại giữ nguyên để chỉnh tiếp.
 6. **Sửa khung đã chọn**: chọn khung (một part bất kỳ của nó) trong Tekla, bấm nút -> thông số và điểm cũ hiện lại; sửa rồi bấm "Cập nhật khung" -> tạo khung mới rồi xóa khung cũ (lỗi thì giữ khung cũ). Mã khung gắn vào UDA `MESHFRAME_ID` của part chính; thông số + điểm lưu ở `<thư mục model>\MeshFrame\<mã>.mfr` (model phải đã lưu).
 7. Tab **Lưới**: *RebarMesh* (mặc định, tự thay bằng tấm mỏng nếu Tekla từ chối) / *Tấm mỏng* / *Không tạo*. Mác và cỡ sợi RebarMesh được kiểm tra với catalog rebar của Tekla (có ô chọn từ catalog). Tab **Tekla**: profile ghi đè, hướng đặt thép góc/nẹp, lệch ngang, đảo cắt vát, nút *Đọc lưới mẫu* (ghi mọi thuộc tính đối tượng đang chọn ra `%APPDATA%\MeshFrame\selected-object.txt`).
-Khi khởi động, app **tự kiểm tra bản Tekla đang dùng có đủ hàm API mà MeshFrame cần** (21.1 / 2020 có thể thiếu so với 2021 / 2025); thiếu thì báo và ghi `%APPDATA%\MeshFrame\api-missing.txt` (nút *Kiểm tra API* ở tab Tekla). Hàm thiếu `PickPoint(chuỗi, điểm)` đã có dự phòng.
+Khi khởi động, app **tự kiểm tra bản Tekla đang dùng có đủ hàm API mà MeshFrame cần** (21.1 / 2020 có thể thiếu so với 2021 / 2025); chỉ hỏi người dùng khi thiếu hàm **bắt buộc**; hàm tùy chọn (như `PickPoint(chuỗi, điểm)` trên 21.1, `GraphicsDrawer`) đã có dự phòng nên không làm phiền. Chi tiết ghi ở `%APPDATA%\MeshFrame\api-missing.txt` (nút *Kiểm tra API* ở tab Tekla).
 Thông số nhớ ở `%APPDATA%\MeshFrame\settings.ini`. Vít: chưa có (sẽ làm thành item sau).
 
 ## Kiểm tra (không cần Tekla): `ci/build.sh`
