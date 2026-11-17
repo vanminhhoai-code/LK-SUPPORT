@@ -30,6 +30,9 @@ static class WriterTests
         Check("14 beam (7 V + 7 nep)", Count("Insert Beam") == 14);
         Check("16 fitting (4 V + 4 nep, 2 dau)", Count("Insert Fitting") == 16);
         Check("1 RebarMesh", Count("Insert RebarMesh") == 1);
+        Check("khuyet: 6 tam cat ContourPlate + 6 BooleanPart + xoa 6 tam", Count("Insert ContourPlate") == 6 && Count("Insert BooleanPart") == 6 && Count("Delete ContourPlate") == 6);
+        Check("tam cat dung class BlOpCl cua Tekla", FakeLog.Entries.Count(e => e == "Cut BlOpCl by plate") == 6);
+        Check("tam cat khong nam trong assembly", Count("Add ContourPlate") == 0);
         Check("7 BoltArray (1/nep)", Count("Insert BoltArray") == 7);
         Check("assembly: 13 Add + Modify", Count("Add Beam") == 13 && Count("Modify Assembly") == 1);
         Check("mat phang doi roi tra lai + commit", Count("SetPlane") == 2 && Count("Commit") == 1);

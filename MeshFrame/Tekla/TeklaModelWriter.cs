@@ -62,24 +62,24 @@ namespace MeshFrame.Tekla
         // ------------------------------------------------------------------ thanh V / nẹp
         private object InsertBar(PlanBar bar)
         {
-            bool stiff = bar.Role == BarRole.Stiffener;
-            object beam = NewBeam(bar.Start, bar.End, bar.ZTop);
+            object beam = NewBeam(bar.Start, bar.End, bar.ZRef);
             Describe(beam, bar.Profile, bar.Material, bar.Name, bar.Class, bar.Prefix, bar.StartNo,
-                     stiff ? P.SPlane : P.VPlane, stiff ? P.SRotation : P.VRotation, stiff ? P.SDepth : P.VDepth);
+                     P.VPlane, P.VRotation, P.VDepth);
             A.Require(beam, "Insert", "thanh " + bar.Profile + " (kiểm tra profile trong catalog)");
-            AddMiter(beam, bar.Start, bar.CutStart, bar.ZTop);
-            AddMiter(beam, bar.End, bar.CutEnd, bar.ZTop);
+            AddMiter(beam, bar.Start, bar.CutStart, bar.ZRef);
+            AddMiter(beam, bar.End, bar.CutEnd, bar.ZRef);
+            foreach (V2[] notch in bar.Notches) AddNotch(beam, notch, bar.Thk, bar.Material);
             return beam;
         }
 
         private object InsertStrip(PlanStrip st)
         {
-            object beam = NewBeam(st.Start, st.End, st.ZBottom);
+            object beam = NewBeam(st.Start, st.End, st.ZRef);
             Describe(beam, st.Profile, st.Material, st.Name, st.Class, st.Prefix, st.StartNo,
                      P.StripPlane, P.StripRotation, P.StripDepth);
             A.Require(beam, "Insert", "nẹp " + st.Profile + " (kiểm tra profile trong catalog)");
-            AddMiter(beam, st.Start, st.CutStart, st.ZBottom);
-            AddMiter(beam, st.End, st.CutEnd, st.ZBottom);
+            AddMiter(beam, st.Start, st.CutStart, st.ZRef);
+            AddMiter(beam, st.End, st.CutEnd, st.ZRef);
             return beam;
         }
 
@@ -118,6 +118,27 @@ namespace MeshFrame.Tekla
             A.Set(plane, "AxisY", A.Vector(0, 0, 1));
             A.Set(fit, "Plane", plane);
             A.Call(fit, "Insert");
+        }
+
+        /// <summary>Khuyết cánh nằm: tấm ContourPlate làm "operative part" (class BlOpCl) + BooleanPart cắt, rồi xoá tấm.
+        /// Theo ví dụ BooleanPart của Tekla Developer Center. Tấm nằm trong mặt phẳng khung, z từ 0 đến độ dày cánh.</summary>
+        private void AddNotch(object beam, V2[] quad, double thk, string material)
+        {
+            object cutter = A.New(A.ModelType("ContourPlate"));
+            foreach (V2 v in quad)
+                A.Call(cutter, "AddContourPoint", A.New(A.ModelType("ContourPoint"), A.Point(v.X, v.Y, thk / 2), null));
+            A.Set(A.Get(cutter, "Profile"), "ProfileString", "PL" + Num(thk));
+            A.Set(A.Get(cutter, "Material"), "MaterialString", material);
+            A.Set(cutter, "Class", A.Static(A.ModelType("BooleanPart"), "BooleanOperativeClassName"));
+            A.Set(A.Get(cutter, "Position"), "Depth", A.Enum("Position+DepthEnum", "MIDDLE"));
+            A.Require(cutter, "Insert", "tấm cắt khuyết");
+
+            object cut = A.New(A.ModelType("BooleanPart"));
+            A.Set(cut, "Father", beam);
+            A.Call(cut, "SetOperativePart", cutter);
+            object ok = A.Call(cut, "Insert");
+            if (ok is bool && !(bool)ok) Messages.Add("Không cắt được khuyết đầu V gia cường.");
+            A.Call(cutter, "Delete");
         }
 
         // ------------------------------------------------------------------ lưới (Reinforcement Mesh)
@@ -165,8 +186,9 @@ namespace MeshFrame.Tekla
                 object bolt = A.New(A.ModelType("BoltArray"));
                 A.Set(bolt, "PartToBeBolted", strips[si]);
                 A.Set(bolt, "PartToBoltTo", bar0);
-                A.Set(bolt, "FirstPosition", A.Point(first.Pos.X, first.Pos.Y, first.ZTop));
-                A.Set(bolt, "SecondPosition", A.Point(first.Pos.X + dir.X, first.Pos.Y + dir.Y, first.ZTop));
+                double z0 = P.FlipBolt ? first.ZHead + first.Length : first.ZHead;   // mặc định đầu vít ở mặt ngoài nẹp
+                A.Set(bolt, "FirstPosition", A.Point(first.Pos.X, first.Pos.Y, z0));
+                A.Set(bolt, "SecondPosition", A.Point(first.Pos.X + dir.X, first.Pos.Y + dir.Y, z0));
                 A.Set(bolt, "BoltSize", first.Dia);
                 A.Set(bolt, "BoltStandard", P.BoltStandard);
                 A.Set(bolt, "Tolerance", 0.0);

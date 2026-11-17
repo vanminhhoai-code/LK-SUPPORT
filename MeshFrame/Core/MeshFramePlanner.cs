@@ -17,27 +17,29 @@ namespace MeshFrame.Core
             plan.Placement = new PlanPlacement
             {
                 VPlane = PlanPlacement.Name(s.VPlane), VRotation = PlanPlacement.Name(s.VRotation), VDepth = PlanPlacement.Name(s.VDepth),
-                SPlane = PlanPlacement.Name(s.SPlane), SRotation = PlanPlacement.Name(s.SRotation), SDepth = PlanPlacement.Name(s.SDepth),
                 StripPlane = PlanPlacement.Name(s.StripPlane), StripRotation = PlanPlacement.Name(s.StripRotation), StripDepth = PlanPlacement.Name(s.StripDepth),
-                FlipMiterCut = s.FlipMiterCut, BoltStandard = s.BoltStandard
+                FlipMiterCut = s.FlipMiterCut, FlipBolt = s.FlipBolt, BoltStandard = s.BoltStandard
             };
             WarnNonAscii(s, plan);
 
-            double tV = s.VThk;
+            double tV = s.VThk, tN = s.StripThk, w = s.StripWidth;
             double meshT = 2 * s.MeshWireDia;           // 2 lớp sợi đan
-            double stripZ = tV + meshT;
+            // Chuẩn 05.TC.01: vật chủ -> cánh nằm V (z từ 0 đến tV, cánh đứng hướng +Z) -> LƯỚI (z từ -meshT đến 0)
+            // -> NẸP PL (z từ -meshT-tN đến -meshT) -> đầu vít. Lưới và nẹp nằm phía NGOÀI, đối diện cánh đứng.
+            double zStrip = -meshT;                      // mặt nẹp tiếp xúc lưới
+            double zHead = -meshT - tN;                  // mặt ngoài nẹp = đầu vít
 
-            // ---------- Lưới: 1 tấm liên tục, lùi MeshGap so với mặt trong cánh đứng V
-            V2[] meshPoly = Geo.Offset(poly, tV + s.MeshGap);
-            if (!Geo.OffsetValid(poly, meshPoly)) { plan.Errors.Add("Khung quá nhỏ so với V và khoảng lùi lưới."); return plan; }
+            // ---------- Lưới: 1 tấm liên tục, lùi MeshGap so với mép ngoài khung
+            V2[] meshPoly = Geo.Offset(poly, s.MeshGap);
+            if (!Geo.OffsetValid(poly, meshPoly)) { plan.Errors.Add("Khung quá nhỏ so với khoảng lùi lưới."); return plan; }
             plan.Mesh = new PlanMesh
             {
-                Polygon = meshPoly, ZBottom = tV, Thickness = meshT, WireDia = s.MeshWireDia, Pitch = s.MeshPitch,
+                Polygon = meshPoly, ZBottom = -meshT, Thickness = meshT, WireDia = s.MeshWireDia, Pitch = s.MeshPitch,
                 WeightKgPerM2 = s.MeshWeightKgPerM2, Grade = s.MeshGrade, Name = s.MeshName, Prefix = s.MeshPrefix,
                 Class = s.MeshClass, StartNo = s.MeshStartNo
             };
 
-            // ---------- 4 thanh V khung (đường tham chiếu = mép ngoài)
+            // ---------- 4 thanh V khung (đường tham chiếu = mép ngoài cánh đứng, cánh nằm quay vào trong)
             for (int k = 0; k < 4; k++)
             {
                 V2 a, b; V2? ca, cb;
@@ -45,35 +47,33 @@ namespace MeshFrame.Core
                 plan.Bars.Add(new PlanBar
                 {
                     Role = BarRole.Frame, Start = a, End = b, CutStart = ca, CutEnd = cb,
-                    LegA = s.VLegA, LegB = s.VLegB, Thk = tV, ZTop = tV, VerticalUp = true, Centered = false,
+                    LegA = s.VLegA, LegB = s.VLegB, Thk = tV, ZRef = 0,
                     Material = s.VMaterial, Name = s.VName, Class = s.VClass, Prefix = s.VPrefix, StartNo = s.VStartNo, ProfileOverride = s.VProfile
                 });
             }
 
-            // ---------- Nẹp quanh khung: sát cánh đứng V, bề rộng StripWidth, đè lên mép lưới
-            double w = s.StripWidth;
+            // ---------- Nẹp quanh khung: PL nằm dưới cánh nằm V (ngoài lưới), mép ngoài trùng mép ngoài V, rộng StripWidth
             if (s.UseStrip)
             {
-                V2[] ringIn = Geo.Offset(poly, tV + w);
-                if (!Geo.OffsetValid(poly, ringIn)) { plan.Errors.Add("Khung quá nhỏ so với V và nẹp."); return plan; }
+                V2[] ringIn = Geo.Offset(poly, w);
+                if (!Geo.OffsetValid(poly, ringIn)) { plan.Errors.Add("Khung quá nhỏ so với nẹp."); return plan; }
                 for (int k = 0; k < 4; k++)
                 {
                     V2 a, b; V2? ca, cb;
-                    EdgeEnds(poly, k, tV + w / 2, tV, tV + w, s.Corner, out a, out b, out ca, out cb);
-                    var st = NewStrip(s, a, b, ca, cb, stripZ, false);
-                    plan.Strips.Add(st);
-                    AddFasteners(plan, s, a, b, stripZ, tV + meshT + s.StripThk, plan.Strips.Count - 1);
+                    EdgeEnds(poly, k, w / 2, 0, w, s.Corner, out a, out b, out ca, out cb);
+                    plan.Strips.Add(NewStrip(s, a, b, ca, cb, zStrip, false));
+                    AddFasteners(plan, s, a, b, zHead, tV + meshT + tN, plan.Strips.Count - 1);
                 }
             }
 
-            // ---------- Gia cường: thanh V chia khung thành các ô, nẹp đi theo
-            if (s.StiffMode != StiffMode.None) AddStiffeners(plan, s, poly, tV, meshT, stripZ);
-
+            // ---------- Gia cường: V cùng tiết diện V khung, vuông góc cạnh gốc, cắt khuyết hai đầu; nẹp đi theo
+            if (s.StiffMode != StiffMode.None) AddStiffeners(plan, s, poly, tV, meshT, zStrip, zHead);
+            WarnLimits(plan, s, poly);
             return plan;
         }
 
         // ---------------------------------------------------------------- gia cường
-        private static void AddStiffeners(MeshFramePlan plan, MeshFrameSettings s, V2[] poly, double tV, double meshT, double stripZ)
+        private static void AddStiffeners(MeshFramePlan plan, MeshFrameSettings s, V2[] poly, double tV, double meshT, double zStrip, double zHead)
         {
             bool d0 = s.StiffDir == StiffDir.AcrossP1P2;
             // d0: ô chia dọc cạnh P1->P2, thanh nối cạnh 0 với cạnh 2.  d1: ô chia dọc cạnh P1->P4, thanh nối cạnh 3 với cạnh 1.
@@ -84,38 +84,78 @@ namespace MeshFrame.Core
             if (cells.Count <= 1) return;
 
             int endA = d0 ? 0 : 3, endB = d0 ? 2 : 1;
-            // Gia cường luôn VUÔNG GÓC với cạnh gốc (cạnh P1-P2 hoặc P1-P4); các ô đo dọc cạnh gốc từ P1.
+            // Gia cường luôn VUÔNG GÓC với cạnh gốc; các ô đo dọc cạnh gốc từ P1.
             V2 baseDir = d0 ? (poly[1] - poly[0]).Unit() : (poly[3] - poly[0]).Unit();
             V2 perp = baseDir.Left();
             double w = s.StripWidth, cum = 0;
+            double legA = s.VLegA;
             for (int i = 0; i < cells.Count - 1; i++)
             {
                 cum += cells[i];
-                V2 A = poly[0] + baseDir * cum;
-                V2 B = A + perp;
-
-                V2 sa, sb;
-                if (!ClipToEdges(poly, A, B, endA, endB, tV, out sa, out sb))
+                V2 A = poly[0] + baseDir * cum;                    // điểm trên đường chia (mặt ngoài cánh đứng gia cường)
+                V2 pa, pb;
+                if (!ClipToEdges(poly, A, A + perp, endA, endB, tV, out pa, out pb))
                 { plan.Errors.Add("Thanh gia cường thứ " + (i + 1) + " vuông góc nằm ngoài khung (khung lệch quá hoặc cạnh trên/dưới không song song)."); return; }
-                plan.Bars.Add(new PlanBar
+
+                // Hướng Start->End = -perp, để bên TRÁI = +baseDir: cánh nằm của gia cường hướng về ô kế tiếp.
+                bool swap = (pb - pa).Dot(perp) > 0;
+                V2 start = swap ? pb : pa, end = swap ? pa : pb;
+                int edgeStart = swap ? endB : endA, edgeEnd = swap ? endA : endB;
+                V2 nLeft = (end - start).Unit().Left();
+
+                var bar = new PlanBar
                 {
-                    Role = BarRole.Stiffener, Start = sa, End = sb,
-                    LegA = s.SLegA, LegB = s.SLegB, Thk = s.SThk, ZTop = tV, VerticalUp = false, Centered = true,
-                    Material = s.SMaterial, Name = s.SName, Class = s.SClass, Prefix = s.SPrefix, StartNo = s.SStartNo, ProfileOverride = s.SProfile
-                });
+                    Role = BarRole.Stiffener, Start = start, End = end,
+                    LegA = s.VLegA, LegB = s.VLegB, Thk = tV, ZRef = 0,        // cùng tiết diện V khung
+                    Material = s.SMaterial, Name = s.SName, Class = s.SClass, Prefix = s.SPrefix, StartNo = s.SStartNo, ProfileOverride = s.VProfile
+                };
+                // Cắt khuyết: cánh đứng dừng ở mặt trong cánh đứng V khung (offset tV); cánh nằm dừng ở mép trong cánh nằm V khung
+                // (offset legA) -> khuyết phần cánh nằm (z từ 0 đến tV) trong vùng offset [tV, legA] ở mỗi đầu.
+                bar.Notches.Add(NotchQuad(poly, start, perp, nLeft, edgeStart, tV, legA));
+                bar.Notches.Add(NotchQuad(poly, end, perp, nLeft, edgeEnd, tV, legA));
+                plan.Bars.Add(bar);
 
                 if (s.UseStrip)
                 {
+                    // Nẹp PL nằm ngay dưới cánh nằm gia cường: phủ offset [0, w] về phía +baseDir; tim cách đường chia w/2.
                     V2 na, nb;
-                    if (!ClipToEdges(poly, A, B, endA, endB, tV + w, out na, out nb))
+                    if (!ClipToEdges(poly, A + nLeft * (w / 2), A + nLeft * (w / 2) + perp, endA, endB, w, out na, out nb))
                     { plan.Errors.Add("Nẹp gia cường thứ " + (i + 1) + " nằm ngoài khung."); return; }
-                    plan.Strips.Add(NewStrip(s, na, nb, null, null, stripZ, true));
-                    AddFasteners(plan, s, na, nb, stripZ, tV + meshT + s.StripThk, plan.Strips.Count - 1);
+                    plan.Strips.Add(NewStrip(s, na, nb, null, null, zStrip, true));
+                    AddFasteners(plan, s, na, nb, zHead, tV + meshT + s.StripThk, plan.Strips.Count - 1);
                 }
             }
             if (s.UseStrip)
                 for (int i = 0; i < cells.Count; i++)
-                    if (cells[i] <= w + s.SLegA) plan.Warnings.Add("Ô " + (i + 1) + " (" + cells[i].ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " mm) rất hẹp so với nẹp/gia cường.");
+                    if (cells[i] <= w + legA) plan.Warnings.Add("Ô " + (i + 1) + " (" + cells[i].ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " mm) rất hẹp so với nẹp/gia cường.");
+        }
+
+        /// <summary>Hình chữ nhật (đa giác) khuyết ở cánh nằm gia cường, vùng chồng với cánh nằm V khung: lệch ngang [-1, legA], dọc theo gia cường từ offset tV/2 đến legA.</summary>
+        private static V2[] NotchQuad(V2[] poly, V2 end, V2 perp, V2 nLeft, int edge, double tV, double legA)
+        {
+            V2 l1 = end + nLeft * (-1), l2 = end + nLeft * legA;
+            V2 oE1, dE1, oE2, dE2;
+            Geo.OffsetLine(poly, edge, tV / 2, out oE1, out dE1);
+            Geo.OffsetLine(poly, edge, legA, out oE2, out dE2);
+            V2 p00, p01, p11, p10;
+            Geo.Intersect(l1, perp, oE1, dE1, out p00);
+            Geo.Intersect(l1, perp, oE2, dE2, out p01);
+            Geo.Intersect(l2, perp, oE2, dE2, out p11);
+            Geo.Intersect(l2, perp, oE1, dE1, out p10);
+            return new[] { p00, p01, p11, p10 };
+        }
+
+        /// <summary>Cảnh báo khi vượt giới hạn của chuẩn: L tối đa 4000, H tối đa 1200, ô tối đa 1000.</summary>
+        private static void WarnLimits(MeshFramePlan plan, MeshFrameSettings s, V2[] poly)
+        {
+            double a = Math.Max((poly[1] - poly[0]).Length, (poly[3] - poly[2]).Length);
+            double b = Math.Max((poly[2] - poly[1]).Length, (poly[0] - poly[3]).Length);
+            double longSide = Math.Max(a, b), shortSide = Math.Min(a, b);
+            if (longSide > 4000 + 0.5) plan.Warnings.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "Cạnh dài {0:0} mm vượt L tối đa 4000 của chuẩn.", longSide));
+            if (shortSide > 1200 + 0.5) plan.Warnings.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "Cạnh ngắn {0:0} mm vượt H tối đa 1200 của chuẩn.", shortSide));
+            foreach (double c in plan.Cells)
+                if (c > 1000 + 0.5) { plan.Warnings.Add("Có ô lớn hơn 1000 mm (chuẩn: @ tối đa 1000)."); break; }
+            if (s.UseStrip && s.StripWidth > s.VLegA + 0.01) plan.Warnings.Add("Nẹp rộng hơn cánh nằm V (chuẩn: PL rộng bằng cánh V).");
         }
 
         private static List<double> CellWidths(MeshFrameSettings s, double total, MeshFramePlan plan)
@@ -213,14 +253,14 @@ namespace MeshFrame.Core
         {
             return new PlanStrip
             {
-                Start = a, End = b, CutStart = ca, CutEnd = cb, Width = s.StripWidth, Thk = s.StripThk, ZBottom = z,
+                Start = a, End = b, CutStart = ca, CutEnd = cb, Width = s.StripWidth, Thk = s.StripThk, ZRef = z,
                 Material = s.StripMaterial, Name = s.StripName, Class = s.StripClass, Prefix = s.StripPrefix,
                 StartNo = s.StripStartNo, OnStiffener = onStiff, ProfileOverride = s.StripProfile
             };
         }
 
         // ---------------------------------------------------------------- liên kết @
-        private static void AddFasteners(MeshFramePlan plan, MeshFrameSettings s, V2 a, V2 b, double zBottom, double length, int stripIndex)
+        private static void AddFasteners(MeshFramePlan plan, MeshFrameSettings s, V2 a, V2 b, double zHead, double length, int stripIndex)
         {
             if (s.Fasten == FastenKind.None) return;
             V2 dir = (b - a).Unit();
@@ -235,7 +275,7 @@ namespace MeshFrame.Core
                 for (int i = 0; i < cnt; i++) pos.Add(s.FastenEdge + i * step);
             }
             foreach (double t in pos)
-                plan.Fasteners.Add(new PlanFastener { Pos = a + dir * t, Kind = s.Fasten, Dia = s.FastenDia, Length = length, ZTop = zBottom + s.StripThk, StripIndex = stripIndex });
+                plan.Fasteners.Add(new PlanFastener { Pos = a + dir * t, Kind = s.Fasten, Dia = s.FastenDia, Length = length, ZHead = zHead, StripIndex = stripIndex });
         }
 
         private static bool IsConvexCcw(V2[] p)

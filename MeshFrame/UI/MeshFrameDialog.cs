@@ -108,15 +108,12 @@ namespace MeshFrame.UI
         private TabPage TabStiff()
         {
             var t = NewPage("Gia cường");
-            Note(t, "Thanh V gia cường luôn vuông góc với đố trên/dưới (cạnh gốc), chia khung thành các ô đo dọc cạnh gốc. Lưới kéo căng liên tục qua gia cường; nẹp đi theo từng thanh.");
+            Note(t, "V gia cường CÙNG TIẾT DIỆN V khung, luôn vuông góc với đố trên/dưới (cạnh gốc), hai đầu cắt khuyết cánh nằm cho khớp V khung. Các ô đo dọc cạnh gốc. Lưới kéo căng liên tục; nẹp PL đi theo từng thanh.");
             Row(t, "StiffMode", "Chia ô", "Không gia cường", "Chia đều (mỗi ô tối đa)", "Nhập từng ô");
             Row(t, "StiffDir", "Chia theo", "Dọc cạnh P1-P2 (thanh đứng)", "Dọc cạnh P1-P4 (thanh ngang)");
             Row(t, "StiffMax", "Mỗi ô tối đa (mm)");
             Row(t, "StiffCells", "Bề rộng từng ô (mm)");
             Note(t, "Nhập từng ô: cách nhau bằng dấu cách, vd  1000 2*1500 800  (n*x = lặp n lần). Tổng nhỏ hơn khung thì tự thêm ô cuối.");
-            Row(t, "SLegA", "V gia cường - a (mm)");
-            Row(t, "SLegB", "V gia cường - b (mm)");
-            Row(t, "SThk", "Độ dày (mm)");
             Row(t, "SMaterial", "Vật liệu");
             Row(t, "SName", "Tên");
             Row(t, "SClass", "Class");
@@ -129,7 +126,7 @@ namespace MeshFrame.UI
         {
             var t = NewPage("Lưới");
             Note(t, "Lưới là Reinforcement Mesh theo đa giác 4 điểm. Không bắt buộc đúng 100% lưới SUS304, có thể đặt tên gợi nhớ.");
-            Row(t, "MeshGap", "Lưới lùi cách mặt trong V (mm)");
+            Row(t, "MeshGap", "Lưới lùi cách mép ngoài khung (mm)");
             Row(t, "MeshWireDia", "Đường kính sợi (mm)");
             Row(t, "MeshPitch", "Bước sợi = ô + sợi (mm)");
             Row(t, "MeshName", "Tên");
@@ -146,7 +143,7 @@ namespace MeshFrame.UI
         {
             var t = NewPage("Nẹp && liên kết");
             Row(t, "UseStrip", "Có nẹp");
-            Note(t, "Nẹp nằm sát cánh đứng V, đè lên mép lưới; chạy quanh khung và theo các thanh gia cường. Bỏ tick: khóa nẹp và liên kết.");
+            Note(t, "Nẹp PL nằm phía ngoài, ép lưới vào cánh nằm V (chuẩn PL-25x1.2, rộng bằng cánh V); chạy quanh khung và theo các thanh gia cường. Bỏ tick: khóa nẹp và liên kết.");
             Row(t, "StripWidth", "Bề rộng nẹp (mm)");
             Row(t, "StripThk", "Độ dày nẹp (mm)");
             Row(t, "StripMaterial", "Vật liệu");
@@ -165,23 +162,19 @@ namespace MeshFrame.UI
         {
             var t = NewPage("Tekla");
             Note(t, "Chỉnh khi kết quả trong Tekla lệch. Dùng chữ KHÔNG DẤU cho các ô gửi sang Tekla (tên, prefix, profile...).");
-            Row(t, "VProfile", "Profile V khung (trống = tự tạo L a*b*t)");
-            Row(t, "SProfile", "Profile V gia cường (trống = tự tạo)");
+            Row(t, "VProfile", "Profile V khung + gia cường (trống = tự tạo)");
             Row(t, "StripProfile", "Profile nẹp (trống = tự tạo FL w*t)");
             Row(t, "BoltStandard", "Bolt standard (vít)");
-            Note(t, "Hướng đặt thép góc V khung:");
+            Note(t, "Hướng đặt thép góc V khung (V gia cường dùng chung):");
             Row(t, "VPlane", "  On plane", "Left", "Middle", "Right");
             Row(t, "VRotation", "  Rotation", "Front", "Top", "Back", "Below");
             Row(t, "VDepth", "  At depth", "Front", "Middle", "Behind");
-            Note(t, "Hướng đặt V gia cường:");
-            Row(t, "SPlane", "  On plane", "Left", "Middle", "Right");
-            Row(t, "SRotation", "  Rotation", "Front", "Top", "Back", "Below");
-            Row(t, "SDepth", "  At depth", "Front", "Middle", "Behind");
             Note(t, "Hướng đặt nẹp:");
             Row(t, "StripPlane", "  On plane", "Left", "Middle", "Right");
             Row(t, "StripRotation", "  Rotation", "Front", "Top", "Back", "Below");
             Row(t, "StripDepth", "  At depth", "Front", "Middle", "Behind");
             Row(t, "FlipMiterCut", "Đảo phía cắt vát (nếu mặt cắt vát ra ngược)");
+            Row(t, "FlipBolt", "Đảo chiều vít (nếu vít ra ngược)");
             return (TabPage)t.Parent;
         }
 
@@ -241,7 +234,7 @@ namespace MeshFrame.UI
             foreach (string n in new[] { "FastenDia", "FastenPitch", "FastenEdge" }) Enable(n, fasten);
 
             bool stiff = _s.StiffMode != StiffMode.None;
-            foreach (string n in new[] { "StiffDir", "SLegA", "SLegB", "SThk", "SMaterial", "SName", "SClass", "SPrefix", "SStartNo" }) Enable(n, stiff);
+            foreach (string n in new[] { "StiffDir", "SMaterial", "SName", "SClass", "SPrefix", "SStartNo" }) Enable(n, stiff);
             Enable("StiffMax", _s.StiffMode == StiffMode.Equal);
             Enable("StiffCells", _s.StiffMode == StiffMode.Custom);
         }
@@ -272,7 +265,7 @@ namespace MeshFrame.UI
                     var parts = new List<string>(); foreach (double c in plan.Cells) parts.Add(c.ToString("0.#", CultureInfo.InvariantCulture));
                     sb.AppendLine("Bề rộng các ô: " + string.Join(" · ", parts.ToArray()));
                 }
-                sb.AppendLine(string.Format("Lưới: {0} lớp {1:0.##} mm, nằm trên V {2:0.##} mm", "2", plan.Mesh.WireDia, plan.Mesh.ZBottom));
+                sb.AppendLine(string.Format("Lưới: {0} lớp sợi {1:0.##} mm, nằm dưới cánh V (phía ngoài), nẹp ngoài lưới", "2", plan.Mesh.WireDia));
                 foreach (string w in plan.Warnings) sb.AppendLine("⚠ " + w);
             }
             _info.Text = sb.ToString();

@@ -67,6 +67,15 @@ namespace MeshFrame.Tekla
             throw new MissingMemberException(target.GetType().FullName, name);
         }
 
+        /// <summary>Hằng/field tĩnh công khai (vd BooleanPart.BooleanOperativeClassName).</summary>
+        public object Static(Type type, string name)
+        {
+            FieldInfo f = type.GetField(name, BindingFlags.Public | BindingFlags.Static);
+            if (f == null) throw new MissingMemberException(type.FullName, name);
+            Note("static " + type.FullName + "::" + name);
+            return f.IsLiteral ? f.GetRawConstantValue() : f.GetValue(null);
+        }
+
         public double GetDouble(object target, string name) { return Convert.ToDouble(Get(target, name), CultureInfo.InvariantCulture); }
 
         public void Set(object target, string name, object value)

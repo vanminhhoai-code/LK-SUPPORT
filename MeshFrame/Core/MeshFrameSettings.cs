@@ -17,45 +17,45 @@ namespace MeshFrame.Core
     public class MeshFrameSettings
     {
         // ---- Khung V (4 thanh quanh 4 điểm pick, mép ngoài trùng đường nối điểm)
-        public double VLegA = 50, VLegB = 50, VThk = 3;
-        public string VMaterial = "SUS304", VName = "KHUNG V", VClass = "4", VPrefix = "V";
+        public double VLegA = 25, VLegB = 25, VThk = 2;   // chuẩn V-25x2 (nhập được tiết diện khác)
+        public string VMaterial = "MA KEM", VName = "KHUNG V", VClass = "4", VPrefix = "V";
         public int VStartNo = 1;
         public string AsmPrefix = "KL";
         public int AsmStartNo = 1;
         public CornerKind Corner = CornerKind.Miter;
 
-        // ---- Gia cường (thanh V chia khung thành các ô)
+        // ---- Gia cường: thanh V CÙNG TIẾT DIỆN với V khung, vuông góc đố trên/dưới, hai đầu cắt khuyết cho khớp V khung
         public StiffMode StiffMode = StiffMode.Equal;
-        public StiffDir StiffDir = StiffDir.AcrossP1P2;   // chia ô dọc theo cạnh P1-P2 hay P1-P4
+        public StiffDir StiffDir = StiffDir.AcrossP1P2;   // chia ô dọc cạnh P1-P2 hay P1-P4
         public double StiffMax = 1000;                    // Equal: mỗi ô tối đa
         public string StiffCells = "1000 1000";           // Custom: bề rộng từng ô, vd "1000 2*1500 800"
-        public double SLegA = 25, SLegB = 25, SThk = 2;
         public string SMaterial = "MA KEM", SName = "GIA CUONG", SClass = "7", SPrefix = "GC";
         public int SStartNo = 1;
 
         // ---- Lưới
-        public double MeshGap = 5, MeshWireDia = 0.65, MeshPitch = 2.65;
+        public double MeshGap = 0, MeshWireDia = 0.37, MeshPitch = 2.37;   // MeshGap: lưới lùi vào so với MÉP NGOÀI khung; chuẩn: ô 2x2, sợi 0.37
         public string MeshName = "LUOI INOX 2x2", MeshGrade = "SUS304", MeshPrefix = "LI";
         public int MeshClass = 6, MeshStartNo = 1;
         public double MeshWeightKgPerM2 = 0;   // 0 = không dùng
 
         // ---- Nẹp (tùy chọn). UseStrip = false -> không nẹp và khóa luôn liên kết
         public bool UseStrip = true;
-        public double StripWidth = 30, StripThk = 3;
+        public double StripWidth = 25, StripThk = 1.2;   // chuẩn PL-25x1.2 (nhập được tiết diện khác)
         public string StripMaterial = "SUS304", StripName = "NEP LUOI", StripClass = "5", StripPrefix = "N";
         public int StripStartNo = 1;
 
         // ---- Tekla: profile (để trống = tự tạo), bolt standard, hướng đặt. Chỉnh khi kết quả trong Tekla lệch.
-        public string VProfile = "", SProfile = "", StripProfile = "";
+        public string VProfile = "", StripProfile = "";   // trống = tự tạo; V gia cường dùng chung profile V khung
         public string BoltStandard = "8.8XOX";
-        public PlaneKind VPlane = PlaneKind.Left, SPlane = PlaneKind.Middle, StripPlane = PlaneKind.Middle;
-        public RotationKind VRotation = RotationKind.Front, SRotation = RotationKind.Front, StripRotation = RotationKind.Front;
-        public DepthKind VDepth = DepthKind.Front, SDepth = DepthKind.Front, StripDepth = DepthKind.Behind;
+        public PlaneKind VPlane = PlaneKind.Left, StripPlane = PlaneKind.Middle;
+        public RotationKind VRotation = RotationKind.Front, StripRotation = RotationKind.Front;
+        public DepthKind VDepth = DepthKind.Front, StripDepth = DepthKind.Front;
         public bool FlipMiterCut = false;
+        public bool FlipBolt = false;   // đảo chiều vít nếu vít ra ngược
 
         // ---- Liên kết (chỉ có nghĩa khi UseStrip)
         public FastenKind Fasten = FastenKind.Screw;
-        public double FastenDia = 5, FastenPitch = 250, FastenEdge = 50;
+        public double FastenDia = 6, FastenPitch = 250, FastenEdge = 50;   // chuẩn vít SC06@250
 
         /// <summary>Kiểm tra dữ liệu nhập. Rỗng = hợp lệ.</summary>
         public List<string> Validate()
@@ -74,8 +74,6 @@ namespace MeshFrame.Core
             }
             if (StiffMode != StiffMode.None)
             {
-                if (SLegA <= 0 || SLegB <= 0 || SThk <= 0) e.Add("Kích thước V gia cường phải > 0.");
-                else if (SThk >= Math.Min(SLegA, SLegB)) e.Add("Độ dày V gia cường phải nhỏ hơn cạnh.");
                 if (StiffMode == StiffMode.Equal && StiffMax <= 0) e.Add("Khoảng cách ô tối đa phải > 0.");
                 if (StiffMode == StiffMode.Custom)
                 {

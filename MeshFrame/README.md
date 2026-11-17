@@ -1,5 +1,7 @@
 # MeshFrame - khung lưới (V + lưới + nẹp + gia cường)
 
+Theo chuẩn 05.TC.01 REV04: V-25x2 (khung = gia cường, cùng tiết diện), nẹp PL-25x1.2, vít SC06@250, L ≤ 4000, H ≤ 1200, @ ≤ 1000. Thứ tự lớp: vật chủ → cánh nằm V → lưới → nẹp PL (phía ngoài) → đầu vít. V gia cường cắt khuyết hai đầu cho khớp V khung. Mọi tiết diện nhập được.
+
 Một `MeshFrame.exe` cho **Tekla 21.1 / 2020 / 2025**: API Tekla nạp lúc chạy bằng reflection (cùng nguyên tắc Cover Tool), không tham chiếu cứng DLL Tekla.
 
 | Thư mục | Vai trò | Phụ thuộc |

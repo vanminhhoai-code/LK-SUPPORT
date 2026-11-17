@@ -9,12 +9,11 @@ namespace MeshFrame.Core
     public class PlanBar
     {
         public BarRole Role;
-        public V2 Start, End;           // Frame: đường mép ngoài (qua điểm pick). Stiffener: đường tim ô chia (cánh nằm đặt giữa tim)
+        public V2 Start, End;           // đường mép ngoài của cánh đứng. Cánh nằm nằm về bên TRÁI của hướng Start->End. Khung: qua điểm pick. Gia cường: đường chia ô.
         public V2? CutStart, CutEnd;    // hướng mặt cắt vát tại đầu (null = cắt vuông)
         public double LegA, LegB, Thk;
-        public double ZTop;             // cao độ mặt trên cánh nằm
-        public bool VerticalUp;         // true: cánh đứng hướng lên (khung); false: hướng xuống (gia cường)
-        public bool Centered;           // cánh nằm đặt giữa đường tham chiếu
+        public double ZRef;             // cao độ đường tham chiếu = góc ngoài của V (mặt dưới cánh nằm); cánh đứng hướng lên (+Z)
+        public List<V2[]> Notches = new List<V2[]>();   // vùng khuyết cắt ở cánh nằm (đa giác trong mặt phẳng, z từ ZRef đến ZRef+Thk)
         public string Material, Name, Class, Prefix;
         public int StartNo;
         public string ProfileOverride;  // rỗng = tự tạo L a*b*t
@@ -25,7 +24,7 @@ namespace MeshFrame.Core
     {
         public V2 Start, End;           // đường tim nẹp
         public V2? CutStart, CutEnd;
-        public double Width, Thk, ZBottom;
+        public double Width, Thk, ZRef;     // ZRef: mặt tiếp xúc lưới; nẹp nằm phía ngoài (-Z) mặt này
         public string Material, Name, Class, Prefix;
         public int StartNo;
         public bool OnStiffener;
@@ -36,7 +35,7 @@ namespace MeshFrame.Core
     public class PlanMesh
     {
         public V2[] Polygon;            // 1 tấm lưới liên tục phủ cả khung (kéo căng qua các gia cường)
-        public double ZBottom, Thickness, WireDia, Pitch, WeightKgPerM2;
+        public double ZBottom, Thickness, WireDia, Pitch, WeightKgPerM2;   // lưới nằm dưới cánh nằm V: Z từ ZBottom (<0) đến 0
         public string Grade, Name, Prefix;
         public int Class, StartNo;
     }
@@ -45,15 +44,15 @@ namespace MeshFrame.Core
     {
         public V2 Pos;
         public FastenKind Kind;
-        public double Dia, Length, ZTop;
+        public double Dia, Length, ZHead;   // ZHead: cao độ mặt đầu vít (ngoài nẹp); vít đi vào theo +Z
         public int StripIndex;          // vít này thuộc nẹp nào (chỉ số trong plan.Strips)
     }
 
     /// <summary>Cách đặt trong Tekla, dạng tên enum Tekla (LEFT, FRONT, BEHIND, ...).</summary>
     public class PlanPlacement
     {
-        public string VPlane, VRotation, VDepth, SPlane, SRotation, SDepth, StripPlane, StripRotation, StripDepth;
-        public bool FlipMiterCut;
+        public string VPlane, VRotation, VDepth, StripPlane, StripRotation, StripDepth;
+        public bool FlipMiterCut, FlipBolt;
         public string BoltStandard;
         public static string Name(PlaneKind k) { return k.ToString().ToUpperInvariant(); }
         public static string Name(RotationKind k) { return k.ToString().ToUpperInvariant(); }

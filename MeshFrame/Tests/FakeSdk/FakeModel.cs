@@ -24,6 +24,7 @@ namespace Tekla.Structures.Model
     {
         public bool Insert() { FakeLog.Add("Insert " + GetType().Name); var b = this as Beam; if (b != null) FakeLog.BeamPositions.Add(b.Position.Plane + "/" + b.Position.Rotation + "/" + b.Position.Depth); return !FakeLog.RejectInsert; }
         public bool Modify() { FakeLog.Add("Modify " + GetType().Name); return true; }
+        public bool Delete() { FakeLog.Add("Delete " + GetType().Name); return true; }
     }
 
     public interface IAssemblable { }
@@ -41,7 +42,23 @@ namespace Tekla.Structures.Model
     }
     public class Beam : Part { public Point StartPoint { get; set; } public Point EndPoint { get; set; } public Beam(Point s, Point e) { StartPoint = s; EndPoint = e; } }
     public class Assembly : ModelObject { public NumberingSeries AssemblyNumber { get; set; } = new NumberingSeries(); public bool Add(IAssemblable o) { FakeLog.Add("Add " + o.GetType().Name); return true; } }
-    public class Fitting : ModelObject { public ModelObject Father { get; set; } public Plane Plane { get; set; } }
+    public abstract class Boolean : ModelObject { public ModelObject Father { get; set; } }
+    public class Fitting : Boolean { public Plane Plane { get; set; } }
+    public class BooleanPart : Boolean
+    {
+        public enum BooleanTypeEnum { BOOLEAN_ADD, BOOLEAN_CUT, BOOLEAN_WELDPREP }
+        public const string BooleanOperativeClassName = "BlOpCl";
+        public BooleanTypeEnum Type { get; set; } public Part OperativePart { get; private set; }
+        public void SetOperativePart(Part p) { OperativePart = p; FakeLog.Add("Cut " + (p.Class ?? "?") + " by plate"); }
+    }
+    public class Chamfer { }
+    public class ContourPoint { public Point Point { get; set; } public Chamfer Chamfer { get; set; } public ContourPoint(Point p, Chamfer c) { Point = p; Chamfer = c; } }
+    public class ContourPlate : Part
+    {
+        private readonly ArrayList _pts = new ArrayList();
+        public bool AddContourPoint(ContourPoint p) { _pts.Add(p); return true; }
+        public int PointCount { get { return _pts.Count; } }
+    }
 
     public class RebarMesh : ModelObject
     {

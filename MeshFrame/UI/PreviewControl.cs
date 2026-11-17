@@ -61,11 +61,11 @@ namespace MeshFrame.UI
 
             // V gia cường (đặt giữa tim)
             foreach (PlanBar b in _plan.Bars)
-                if (b.Role == BarRole.Stiffener) FillBand(g, T, b.Start, b.End, b.LegA, Color.FromArgb(235, 214, 100, 20));
+                if (b.Role == BarRole.Stiffener) FillBand(g, T, b.Start, b.End, 0, b.LegA, Color.FromArgb(235, 214, 100, 20));
 
             // nẹp
             foreach (PlanStrip s in _plan.Strips)
-                FillBand(g, T, s.Start, s.End, s.Width, Color.FromArgb(200, 39, 174, 96));
+                FillBand(g, T, s.Start, s.End, -s.Width / 2, s.Width / 2, Color.FromArgb(200, 39, 174, 96));
 
             // vít
             using (var br = new SolidBrush(Color.Black))
@@ -85,10 +85,11 @@ namespace MeshFrame.UI
                 }
         }
 
-        private static void FillBand(Graphics g, System.Func<V2, PointF> T, V2 a, V2 b, double width, Color col)
+        /// <summary>Dải từ lệch d0 đến d1 so với đường a-b, đo về bên TRÁI của hướng a->b.</summary>
+        private static void FillBand(Graphics g, System.Func<V2, PointF> T, V2 a, V2 b, double d0, double d1, Color col)
         {
-            V2 n = (b - a).Unit().Left() * (width / 2);
-            var pts = new[] { T(a + n), T(b + n), T(b - n), T(a - n) };
+            V2 n = (b - a).Unit().Left();
+            var pts = new[] { T(a + n * d0), T(b + n * d0), T(b + n * d1), T(a + n * d1) };
             using (var br = new SolidBrush(col)) g.FillPolygon(br, pts);
         }
     }

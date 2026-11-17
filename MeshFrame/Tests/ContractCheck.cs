@@ -64,6 +64,11 @@ static class ContractCheck
                     if (t == null) { if (tn.StartsWith("Tekla.")) err = "không có kiểu"; }
                     else if (!t.GetConstructors().Any(c => ParamsMatch(c.GetParameters(), ch))) err = "không có hàm tạo (" + string.Join(", ", ch) + ")";
                 }
+                else if (kind == "static")
+                {
+                    int i = rest.IndexOf("::"); Type t = Find(rest.Substring(0, i));
+                    if (t == null || t.GetField(rest.Substring(i + 2), BindingFlags.Public | BindingFlags.Static) == null) err = "không có field tĩnh";
+                }
                 else if (kind == "enum")
                 {
                     int i = rest.IndexOf("::"); Type t = Find(rest.Substring(0, i));
