@@ -14,6 +14,12 @@ namespace MeshFrame.Tekla
 
     public static class TeklaPicker
     {
+        /// <summary>Lời nhắc hiện trên thanh trạng thái Tekla: CHỈ ASCII (Tekla không hiển thị được tiếng Việt có dấu ở đây).</summary>
+        public static string Prompt(int index)
+        {
+            return "MeshFrame: pick diem P" + index + " / 4 (lien tiep quanh khung, nguoc chieu kim dong ho nhin tu tren)";
+        }
+
         /// <summary>Pick đủ 4 điểm. Dừng giữa chừng (Esc hay Tekla ném lỗi lúc pick) -> Corners = null kèm StopReason.
         /// Lỗi khi đổi toạ độ (không phải do người dùng) được ném ra, không bị nuốt.</summary>
         public static PickResult PickCorners(TeklaApi api, object model)
@@ -29,7 +35,7 @@ namespace MeshFrame.Tekla
                 object p;
                 try
                 {
-                    p = api.Call(picker, "PickPoint", "MeshFrame: pick điểm P" + (i + 1) + " / 4 (đi liên tiếp quanh khung, ngược chiều kim đồng hồ nhìn từ trên)");
+                    p = api.Call(picker, "PickPoint", Prompt(i + 1));
                 }
                 catch (Exception ex)
                 {

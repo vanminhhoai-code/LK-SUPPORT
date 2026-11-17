@@ -66,6 +66,7 @@ static class WriterTests
         pr = TeklaPicker.PickCorners(api, new Tekla.Structures.Model.Model());
         Check("Esc o diem 2: dung, noi ro ly do", !pr.Complete && pr.Picked == 1 && pr.StopReason != null && pr.StopReason.Contains("interrupted"));
         FakeLog.PickFailAt = -1;
+        Check("loi nhac pick chi ASCII (Tekla loi font neu co dau)", !FakeLog.NonAsciiPrompt);
 
         // --- SdkThread hook
         int hooked = 0;
