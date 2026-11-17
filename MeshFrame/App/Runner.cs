@@ -33,12 +33,36 @@ namespace MeshFrame.App
                 return 3;
             }
 
+            // Bản Tekla này có đủ hàm API MeshFrame cần không? (21.1 / 2020 có thể thiếu so với 2021 / 2025)
+            Func<string> apiCheck = delegate
+            {
+                List<string> missing = TeklaContract.VerifyLoaded(api);
+                string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MeshFrame", "api-missing.txt");
+                if (missing.Count == 0) return "Tekla " + release + ": đủ mọi hàm API mà MeshFrame dùng.";
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllLines(path, missing.ToArray());
+                var head = new List<string>(); for (int i = 0; i < Math.Min(8, missing.Count); i++) head.Add("• " + missing[i].Split(new[] { "   <--" }, StringSplitOptions.None)[0]);
+                return "Tekla " + release + " THIẾU " + missing.Count + " thành viên API mà MeshFrame dùng:\n\n" + string.Join("\n", head.ToArray()) + (missing.Count > 8 ? "\n..." : "")
+                       + "\n\nDanh sách đầy đủ: " + path + "\nGửi file này cho người hỗ trợ; chức năng liên quan có thể lỗi.";
+            };
+            try
+            {
+                string startup = apiCheck();
+                if (startup.Contains("THIẾU")) MessageBox.Show(startup, title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            catch (Exception) { }
+
             var svc = new TeklaFrameService(api, model);
             PickResult lastPick = null;
             Func<V3[]> pick = delegate
             {
                 if (lastPick != null && lastPick.Cleanup != null) lastPick.Cleanup();     // xóa đồ họa tạm của lần pick trước
-                lastPick = TeklaPicker.PickPolygon(api, model);
+                try { lastPick = TeklaPicker.PickPolygon(api, model); }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Lỗi khi pick (bản Tekla này thiếu hàm API?):\n" + Root(ex).GetType().Name + ": " + Root(ex).Message, title, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return null;
+                }
                 if (!lastPick.Complete)
                 {
                     MessageBox.Show("Pick dừng ở " + lastPick.Picked + " điểm, cần ít nhất 3 điểm. Chưa có gì được tạo.\n" + lastPick.StopReason, title, MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -54,6 +78,7 @@ namespace MeshFrame.App
                 dlg.Settings = SettingsStore.Load(SettingsPath);
                 dlg.PickHandler = pick;
                 dlg.SelectedObjectProbe = delegate { return TeklaProbe.DumpSelected(api); };
+                dlg.ApiCheckHandler = apiCheck;
                 dlg.CreateHandler = delegate (MeshFrameSettings s, V3[] pts)
                 {
                     ServiceResult r = svc.Create(s, pts);

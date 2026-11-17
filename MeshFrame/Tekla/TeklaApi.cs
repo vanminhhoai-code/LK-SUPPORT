@@ -25,6 +25,10 @@ namespace MeshFrame.Tekla
             _model = modelAssembly; _geo = geometryAssembly; _cat = catalogAssembly;
         }
 
+        public Assembly ModelAssembly { get { return _model; } }
+        public Assembly GeometryAssembly { get { return _geo; } }
+        public Assembly CatalogAssembly { get { return _cat; } }
+
         /// <summary>Có Tekla.Structures.Catalogs.dll (catalog rebar, mesh, ...) không.</summary>
         public bool HasCatalogs { get { return _cat != null; } }
 

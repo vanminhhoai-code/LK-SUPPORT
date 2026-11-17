@@ -214,6 +214,8 @@ namespace Tekla.Structures.Model.UI
             return new Tekla.Structures.Geometry3d.Point(c[0], c[1], c[2]);
         }
         public Tekla.Structures.Geometry3d.Point PickPoint(string prompt) { return Next(prompt); }
+#if !NO_PICK_REF
         public Tekla.Structures.Geometry3d.Point PickPoint(string prompt, Tekla.Structures.Geometry3d.Point reference) { return Next(prompt); }
+#endif
     }
 }

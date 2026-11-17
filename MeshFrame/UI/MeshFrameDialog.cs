@@ -41,6 +41,8 @@ namespace MeshFrame.UI
         public Func<LoadedFrame> EditHandler { get; set; }
         /// <summary>Đọc đối tượng đang chọn trong Tekla (lưới mẫu): trả về thông báo hiển thị.</summary>
         public Func<string> SelectedObjectProbe { get; set; }
+        /// <summary>Kiểm tra bản Tekla đang dùng có đủ các hàm API mà MeshFrame cần: trả về thông báo hiển thị.</summary>
+        public Func<string> ApiCheckHandler { get; set; }
 
         /// <summary>Các điểm pick (toạ độ GLOBAL). Gán để hiện hình thật trong app.</summary>
         public V3[] Points
@@ -223,6 +225,18 @@ namespace MeshFrame.UI
             t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             t.Controls.Add(probe, 0, pr);
             t.SetColumnSpan(probe, 2);
+            var apiCheck = new Button { Text = "Kiểm tra API của bản Tekla này", AutoSize = true, Margin = new Padding(3, 6, 3, 3) };
+            apiCheck.Click += delegate
+            {
+                if (ApiCheckHandler == null) { MessageBox.Show("Chỉ dùng khi chạy cùng Tekla.", "MeshFrame"); return; }
+                string msg;
+                try { msg = ApiCheckHandler(); } catch (Exception ex) { msg = "Lỗi: " + ex.Message; }
+                MessageBox.Show(msg, "MeshFrame");
+            };
+            int pr2 = t.RowCount++;
+            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            t.Controls.Add(apiCheck, 0, pr2);
+            t.SetColumnSpan(apiCheck, 2);
             return (TabPage)t.Parent;
         }
 

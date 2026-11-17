@@ -13,6 +13,22 @@ static class WriterTests
 {
     static int fail, pass;
     static void Check(string n, bool ok) { if (ok) pass++; else { fail++; Console.WriteLine("FAIL: " + n); } }
+    // Chế độ "legacy": SDK giả không có PickPoint(chuỗi, điểm) - lỗi thật đã gặp trên Tekla 21.1.
+    static int Legacy(TeklaApi api)
+    {
+        FakeLog.Reset(); FakeCatalog.Reset(); FakeLog.Picked = 0;
+        foreach (var p in new[] { new[] { 0.0, 0, 0 }, new[] { 3000.0, 0, 0 }, new[] { 3000.0, 1000, 0 }, new[] { 1500.0, 1600, 0 }, new[] { 0.0, 1000, 0 } }) FakeLog.PickScript.Add(p);
+        PickResult pr = TeklaPicker.PickPolygon(api, new Tekla.Structures.Model.Model());
+        Check("[legacy] pick 5 diem van chay dung PickPoint(chuoi) khi thieu PickPoint(chuoi, diem)", pr.Complete && pr.Points.Length == 5 && pr.Picked == 5);
+        Check("[legacy] van ve du: 14 net + 9 nhan, du cac diem", Count("DrawLine") == 14 && CountStart("DrawText") == 9 && pr.Points[3].Y == 1600);
+        Check("[legacy] loi nhac van co so do doan truoc + chu vi", FakeLog.Prompts.Count == 6 && FakeLog.Prompts[3].Contains("doan truoc 1000.0 mm") && FakeLog.Prompts[3].Contains("chu vi 4000.0 mm"));
+        Check("[legacy] ChUA dung o diem 1 (loi cu: coi thieu ham la ket thuc)", pr.Picked > 1 && pr.StopReason != null && pr.StopReason.Contains("interrupted"));
+        var missing = TeklaContract.VerifyLoaded(api);
+        Check("[legacy] kiem tra API trong app bao DUNG thieu PickPoint(chuoi, diem)", missing.Count == 1 && missing[0].Contains("PickPoint"));
+        Console.WriteLine("legacy pass " + pass + " fail " + fail + "  (API thieu theo kiem tra: " + missing.Count + ")");
+        return fail == 0 ? 0 : 1;
+    }
+
     static int Count(string e) { return FakeLog.Entries.Count(x => x == e); }
     static int CountStart(string prefix) { return FakeLog.Entries.Count(x => x.StartsWith(prefix)); }
     static void Reset() { FakeLog.Reset(); FakeCatalog.Reset(); }
@@ -22,6 +38,7 @@ static class WriterTests
         TeklaApi api = TeklaApi.Load(a[0]);
         var used = new HashSet<string>();
         api.Trace = delegate (string s) { used.Add(s); };
+        if (a.Length > 2 && a[2] == "legacy") return Legacy(api);          // bản Tekla KHÔNG có PickPoint(chuỗi, điểm), như 21.1 thật
 
         var corners = new[] { new V3(0, 0, 5000), new V3(4000, 0, 5000), new V3(4000, 1200, 5120), new V3(0, 1200, 5120) };
         var penta = new[] { new V3(0, 0, 0), new V3(2500, 0, 0), new V3(3000, 800, 0), new V3(1500, 1300, 0), new V3(-200, 700, 0) };
@@ -220,6 +237,11 @@ static class WriterTests
         Reset();
         MeshFrameBuilder.Build(new MeshFrameSettings { StiffMode = StiffMode.None, UseStrip = false }, corners, new TeklaModelWriter(api, null));
         Check("moi loi goi SDK qua Invoke", hooked > 50);
+
+        // ---------------------------------------------------------------- hợp đồng ngay trong app + phân biệt lỗi API với ngắt pick
+        Check("kiem tra API trong app: SDK day du -> khong thieu gi", TeklaContract.VerifyLoaded(api).Count == 0);
+        Check("IsApiError: thieu ham/kieu la loi API, nguoi dung ngat pick thi khong", TeklaPicker.IsApiError(new MissingMethodException("x")) && TeklaPicker.IsApiError(new MissingMemberException("x"))
+              && TeklaPicker.IsApiError(new TypeLoadException("x")) && !TeklaPicker.IsApiError(new ApplicationException("User interrupted")));
 
         File.WriteAllLines(a[1], used.OrderBy(x => x).ToArray());
         Console.WriteLine("writer pass " + pass + " fail " + fail + "  (thanh vien Tekla da dung: " + used.Count + ")");

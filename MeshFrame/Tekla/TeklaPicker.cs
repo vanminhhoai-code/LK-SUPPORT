@@ -44,6 +44,7 @@ namespace MeshFrame.Tekla
             var pts = new List<V3>();
             var local = new List<object>();
             double perimeter = 0, last = 0;
+            bool useRef = true;                                                 // PickPoint(chuỗi, điểm trước): Tekla 21.1 KHÔNG có hàm này
             while (true)
             {
                 int k = pts.Count;
@@ -51,12 +52,13 @@ namespace MeshFrame.Tekla
                 try
                 {
                     string prompt = Prompt(k + 1, last, perimeter);
-                    p = k == 0 ? api.Call(picker, "PickPoint", prompt) : api.Call(picker, "PickPoint", prompt, local[k - 1]);
+                    p = PickOne(api, picker, prompt, k > 0 ? local[k - 1] : null, ref useRef);
                 }
-                catch (Exception ex)                                            // chuột giữa / Esc / Tekla dừng pick
+                catch (Exception ex)
                 {
                     while (ex.InnerException != null) ex = ex.InnerException;
-                    res.StopReason = ex.GetType().Name + ": " + ex.Message;
+                    if (IsApiError(ex)) throw;                                  // thiếu hàm của bản Tekla này: báo lỗi thật, KHÔNG coi là dừng pick
+                    res.StopReason = ex.GetType().Name + ": " + ex.Message;     // chuột giữa / Esc / Tekla dừng pick
                     break;
                 }
                 object g = api.Call(toGlobal, "Transform", p);                  // lỗi đổi toạ độ được ném ra, không nuốt
@@ -72,6 +74,23 @@ namespace MeshFrame.Tekla
             }
             if (pts.Count >= 3) res.Points = pts.ToArray();
             return res;
+        }
+
+        /// <summary>Lỗi do bản Tekla thiếu hàm/kiểu (khác với người dùng ngắt pick).</summary>
+        public static bool IsApiError(Exception ex)
+        {
+            return ex is MissingMemberException || ex is TypeLoadException || ex is MethodAccessException || ex is InvalidCastException;
+        }
+
+        /// <summary>Pick một điểm: ưu tiên PickPoint(chuỗi, điểm trước) để Tekla vẽ dây thun; bản Tekla không có hàm đó thì dùng PickPoint(chuỗi).</summary>
+        private static object PickOne(TeklaApi api, object picker, string prompt, object previous, ref bool useRef)
+        {
+            if (previous != null && useRef)
+            {
+                try { return api.Call(picker, "PickPoint", prompt, previous); }
+                catch (MissingMethodException) { useRef = false; }
+            }
+            return api.Call(picker, "PickPoint", prompt);
         }
 
         // Điểm k: dấu thập + nhãn "P{k+1}"; từ điểm thứ 2: đoạn nối từ điểm trước + chiều dài ở giữa đoạn.
