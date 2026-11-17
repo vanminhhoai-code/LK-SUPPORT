@@ -1,2 +1,5 @@
-# Đổi tên thành MeshFrame.ini, để cạnh MeshFrame.exe. Chỉ cần khi exe không tự tìm ra Tekla.
-TeklaBin=C:\TeklaStructures\2025.0\bin
+# Đổi tên thành MeshFrame.ini, để cạnh MeshFrame.exe. Chỉ cần khi exe không tự tìm ra thư mục API Tekla.
+# Chỉ đường dẫn tới thư mục chứa Tekla.Structures.dll + Tekla.Structures.Model.dll của bản bạn dùng, ví dụ:
+# TeklaBin=C:\TeklaStructures\2025.0\bin
+# TeklaBin=C:\TeklaStructures\2020.0\nt\bin\plugins
+# TeklaBin=C:\TeklaStructures\21.1\nt\bin\plugins

@@ -1,30 +1,18 @@
-// Bộ ghi plan vào model Tekla bằng API gốc (Tekla.Structures.Model).
-// Mã nguồn DUY NHẤT cho mọi phiên bản; biên dịch riêng cho từng bản Tekla (21.1 / 2020 / 2025) bằng build-writer.bat,
-// vì DLL Tekla gắn với đúng phiên bản của nó. Cover Tool chọn DLL theo --tekla-version.
+// Ghi MeshFramePlan vào Tekla qua TeklaApi (reflection) -> một bản chạy cho 21.1 / 2020 / 2025.
+// Mọi thành viên Tekla được dùng đều bị test hợp đồng (Tests/) đối chiếu với DLL thật khi chạy ci/build.sh.
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using MeshFrame.Core;
-using TSG = Tekla.Structures.Geometry3d;
-using TSM = Tekla.Structures.Model;
 
 namespace MeshFrame.Tekla
 {
-    /// <summary>Cách đặt thép góc/nẹp so với đường tham chiếu. Đây là phần cần chỉnh 1 lần khi chạy thử trong Tekla.</summary>
+    /// <summary>Cách đặt thép góc/nẹp so với đường tham chiếu (tên enum Tekla dạng chữ). Cần chỉnh 1 lần khi chạy thử trong Tekla.</summary>
     public class TeklaPlacement
     {
-        public TSM.Position.PlaneEnum VPlane = TSM.Position.PlaneEnum.LEFT;
-        public TSM.Position.RotationEnum VRotation = TSM.Position.RotationEnum.FRONT;
-        public TSM.Position.DepthEnum VDepth = TSM.Position.DepthEnum.FRONT;
-
-        public TSM.Position.PlaneEnum SPlane = TSM.Position.PlaneEnum.MIDDLE;
-        public TSM.Position.RotationEnum SRotation = TSM.Position.RotationEnum.FRONT;
-        public TSM.Position.DepthEnum SDepth = TSM.Position.DepthEnum.FRONT;
-
-        public TSM.Position.PlaneEnum StripPlane = TSM.Position.PlaneEnum.MIDDLE;
-        public TSM.Position.RotationEnum StripRotation = TSM.Position.RotationEnum.FRONT;
-        public TSM.Position.DepthEnum StripDepth = TSM.Position.DepthEnum.BEHIND;
-
+        public string VPlane = "LEFT", VRotation = "FRONT", VDepth = "FRONT";
+        public string SPlane = "MIDDLE", SRotation = "FRONT", SDepth = "FRONT";
+        public string StripPlane = "MIDDLE", StripRotation = "FRONT", StripDepth = "BEHIND";
         /// <summary>Đảo phía bị cắt của Fitting nếu mặt cắt vát ra ngược.</summary>
         public bool FlipMiterCut = false;
         public string BoltStandard = "8.8XOX";
@@ -32,132 +20,151 @@ namespace MeshFrame.Tekla
 
     public sealed class TeklaModelWriter : IModelWriter
     {
-        private readonly TSM.Model _model = new TSM.Model();
+        private readonly TeklaApi A;
+        private readonly object _model;
         public readonly TeklaPlacement Placement = new TeklaPlacement();
         public readonly List<string> Messages = new List<string>();
 
+        /// <param name="model">Đối tượng Tekla.Structures.Model.Model đã có (Cover Tool: model của gateway); null = tạo mới.</param>
+        public TeklaModelWriter(TeklaApi api, object model)
+        {
+            A = api;
+            _model = model ?? A.New(A.ModelType("Model"));
+        }
+
         public void Write(MeshFramePlan plan, Frame f)
         {
-            TSM.WorkPlaneHandler wph = _model.GetWorkPlaneHandler();
-            TSM.TransformationPlane old = wph.GetCurrentTransformationPlane();
+            object wph = A.Call(_model, "GetWorkPlaneHandler");
+            object old = A.Call(wph, "GetCurrentTransformationPlane");
             try
             {
-                // Làm việc trong hệ của khung: X = U, Y = V, Z = pháp tuyến N. Toạ độ 3 điểm của Frame là toạ độ GLOBAL.
-                wph.SetCurrentTransformationPlane(new TSM.TransformationPlane(G(f.Origin), Vc(f.U), Vc(f.V)));
+                // Làm việc trong hệ của khung: X = U, Y = V, Z = pháp tuyến N. Toạ độ của Frame là GLOBAL.
+                object tp = A.New(A.ModelType("TransformationPlane"), A.Point(f.Origin.X, f.Origin.Y, f.Origin.Z),
+                                  A.Vector(f.U.X, f.U.Y, f.U.Z), A.Vector(f.V.X, f.V.Y, f.V.Z));
+                A.Call(wph, "SetCurrentTransformationPlane", tp);
 
-                var barParts = new List<TSM.Beam>();
-                foreach (PlanBar b in plan.Bars) barParts.Add(InsertBar(b, plan));
-                if (barParts.Count == 0) return;
+                var bars = new List<object>();
+                foreach (PlanBar b in plan.Bars) bars.Add(InsertBar(b));
+                if (bars.Count == 0) return;
 
-                var stripParts = new List<TSM.Beam>();
-                foreach (PlanStrip s in plan.Strips) stripParts.Add(InsertStrip(s));
+                var strips = new List<object>();
+                foreach (PlanStrip s in plan.Strips) strips.Add(InsertStrip(s));
 
-                // Lưới: gắn vào cánh nằm của V khung đầu tiên
-                if (plan.Mesh != null) InsertMesh(plan.Mesh, barParts[0]);
-
-                if (plan.Fasteners.Count > 0) InsertFasteners(plan, stripParts, barParts[0]);
+                if (plan.Mesh != null) InsertMesh(plan.Mesh, bars[0]);
+                if (plan.Fasteners.Count > 0) InsertFasteners(plan, strips, bars[0]);
 
                 // Gộp thành 1 assembly, main = V khung đầu tiên
-                TSM.Assembly asm = barParts[0].GetAssembly();
-                for (int i = 1; i < barParts.Count; i++) asm.Add(barParts[i]);
-                foreach (TSM.Beam sp in stripParts) asm.Add(sp);
-                asm.AssemblyNumber.Prefix = plan.AsmPrefix;
-                asm.AssemblyNumber.StartNumber = plan.AsmStartNo;
-                asm.Modify();
+                object asm = A.Call(bars[0], "GetAssembly");
+                for (int i = 1; i < bars.Count; i++) A.Call(asm, "Add", bars[i]);
+                foreach (object sp in strips) A.Call(asm, "Add", sp);
+                object num = A.Get(asm, "AssemblyNumber");
+                A.Set(num, "Prefix", plan.AsmPrefix);
+                A.Set(num, "StartNumber", plan.AsmStartNo);
+                A.Call(asm, "Modify");
             }
             finally
             {
-                wph.SetCurrentTransformationPlane(old);
-                _model.CommitChanges();
+                A.Call(wph, "SetCurrentTransformationPlane", old);
+                A.Call(_model, "CommitChanges");
             }
         }
 
-        // ------------------------------------------------------------------ thanh V
-        private TSM.Beam InsertBar(PlanBar bar, MeshFramePlan plan)
+        // ------------------------------------------------------------------ thanh V / nẹp
+        private object InsertBar(PlanBar bar)
         {
-            var p = Placement;
             bool stiff = bar.Role == BarRole.Stiffener;
-            var beam = new TSM.Beam(Pt(bar.Start, bar.ZTop), Pt(bar.End, bar.ZTop));
-            beam.Profile.ProfileString = bar.Profile;
-            beam.Material.MaterialString = bar.Material;
-            beam.Name = bar.Name;
-            beam.Class = bar.Class;
-            beam.PartNumber.Prefix = bar.Prefix;
-            beam.PartNumber.StartNumber = bar.StartNo;
-            beam.Position.Plane = stiff ? p.SPlane : p.VPlane;
-            beam.Position.Rotation = stiff ? p.SRotation : p.VRotation;
-            beam.Position.Depth = stiff ? p.SDepth : p.VDepth;
-            if (!beam.Insert()) throw new InvalidOperationException("Không tạo được thanh " + bar.Profile + " (kiểm tra profile trong catalog).");
+            object beam = NewBeam(bar.Start, bar.End, bar.ZTop);
+            Describe(beam, bar.Profile, bar.Material, bar.Name, bar.Class, bar.Prefix, bar.StartNo,
+                     stiff ? Placement.SPlane : Placement.VPlane, stiff ? Placement.SRotation : Placement.VRotation, stiff ? Placement.SDepth : Placement.VDepth);
+            A.Require(beam, "Insert", "thanh " + bar.Profile + " (kiểm tra profile trong catalog)");
             AddMiter(beam, bar.Start, bar.CutStart, bar.ZTop);
             AddMiter(beam, bar.End, bar.CutEnd, bar.ZTop);
             return beam;
         }
 
-        private TSM.Beam InsertStrip(PlanStrip st)
+        private object InsertStrip(PlanStrip st)
         {
-            var p = Placement;
-            double zc = st.ZBottom;
-            var beam = new TSM.Beam(Pt(st.Start, zc), Pt(st.End, zc));
-            beam.Profile.ProfileString = st.Profile;
-            beam.Material.MaterialString = st.Material;
-            beam.Name = st.Name;
-            beam.Class = st.Class;
-            beam.PartNumber.Prefix = st.Prefix;
-            beam.PartNumber.StartNumber = st.StartNo;
-            beam.Position.Plane = p.StripPlane;
-            beam.Position.Rotation = p.StripRotation;
-            beam.Position.Depth = p.StripDepth;
-            if (!beam.Insert()) throw new InvalidOperationException("Không tạo được nẹp " + st.Profile + " (kiểm tra profile trong catalog).");
-            AddMiter(beam, st.Start, st.CutStart, zc);
-            AddMiter(beam, st.End, st.CutEnd, zc);
+            object beam = NewBeam(st.Start, st.End, st.ZBottom);
+            Describe(beam, st.Profile, st.Material, st.Name, st.Class, st.Prefix, st.StartNo,
+                     Placement.StripPlane, Placement.StripRotation, Placement.StripDepth);
+            A.Require(beam, "Insert", "nẹp " + st.Profile + " (kiểm tra profile trong catalog)");
+            AddMiter(beam, st.Start, st.CutStart, st.ZBottom);
+            AddMiter(beam, st.End, st.CutEnd, st.ZBottom);
             return beam;
         }
 
+        private object NewBeam(V2 a, V2 b, double z)
+        {
+            return A.New(A.ModelType("Beam"), A.Point(a.X, a.Y, z), A.Point(b.X, b.Y, z));
+        }
+
+        private void Describe(object beam, string profile, string material, string name, string cls, string prefix, int startNo,
+                              string plane, string rotation, string depth)
+        {
+            A.Set(A.Get(beam, "Profile"), "ProfileString", profile);
+            A.Set(A.Get(beam, "Material"), "MaterialString", material);
+            A.Set(beam, "Name", name);
+            A.Set(beam, "Class", cls);
+            object pn = A.Get(beam, "PartNumber");
+            A.Set(pn, "Prefix", prefix);
+            A.Set(pn, "StartNumber", startNo);
+            object pos = A.Get(beam, "Position");
+            A.Set(pos, "Plane", A.Enum("Position+PlaneEnum", plane));
+            A.Set(pos, "Rotation", A.Enum("Position+RotationEnum", rotation));
+            A.Set(pos, "Depth", A.Enum("Position+DepthEnum", depth));
+        }
+
         /// <summary>Cắt vát đầu thanh bằng Fitting: mặt phẳng chứa hướng phân giác và pháp tuyến Z.</summary>
-        private void AddMiter(TSM.Beam beam, V2 end, V2? cutDir, double z)
+        private void AddMiter(object beam, V2 end, V2? cutDir, double z)
         {
             if (!cutDir.HasValue) return;
             V2 d = cutDir.Value;
             if (Placement.FlipMiterCut) d = d * -1;
-            var fit = new TSM.Fitting();
-            fit.Father = beam;
-            fit.Plane = new TSM.Plane();
-            fit.Plane.Origin = Pt(end, z);
-            fit.Plane.AxisX = new TSG.Vector(d.X, d.Y, 0);
-            fit.Plane.AxisY = new TSG.Vector(0, 0, 1);
-            fit.Insert();
+            object fit = A.New(A.ModelType("Fitting"));
+            A.Set(fit, "Father", beam);
+            object plane = A.New(A.ModelType("Plane"));
+            A.Set(plane, "Origin", A.Point(end.X, end.Y, z));
+            A.Set(plane, "AxisX", A.Vector(d.X, d.Y, 0));
+            A.Set(plane, "AxisY", A.Vector(0, 0, 1));
+            A.Set(fit, "Plane", plane);
+            A.Call(fit, "Insert");
         }
 
         // ------------------------------------------------------------------ lưới (Reinforcement Mesh)
-        private void InsertMesh(PlanMesh m, TSM.Beam father)
+        private void InsertMesh(PlanMesh m, object father)
         {
-            var poly = new TSM.Polygon();
-            foreach (V2 v in m.Polygon) poly.Points.Add(Pt(v, m.ZBottom + m.Thickness / 2));
+            double zc = m.ZBottom + m.Thickness / 2;
+            object poly = A.New(A.ModelType("Polygon"));
+            IList pts = (IList)A.Get(poly, "Points");
+            foreach (V2 v in m.Polygon) pts.Add(A.Point(v.X, v.Y, zc));
 
-            var mesh = new TSM.RebarMesh();
-            mesh.Father = father;
-            mesh.Polygon = poly;
-            mesh.MeshType = TSM.RebarMesh.RebarMeshTypeEnum.POLYGON_MESH;
-            mesh.Name = m.Name;
-            mesh.Grade = m.Grade;
-            mesh.Class = m.Class;
-            mesh.NumberingSeries.Prefix = m.Prefix;
-            mesh.NumberingSeries.StartNumber = m.StartNo;
-            mesh.LongitudinalSize = Num(m.WireDia);
-            mesh.CrossSize = Num(m.WireDia);
-            mesh.LongitudinalDistances = new ArrayList { m.Pitch };
-            mesh.CrossDistances = new ArrayList { m.Pitch };
-            mesh.StartPoint = Pt(m.Polygon[0], m.ZBottom + m.Thickness / 2);
-            mesh.EndPoint = Pt(m.Polygon[1], m.ZBottom + m.Thickness / 2);
-            if (!mesh.Insert()) Messages.Add("Không tạo được lưới (RebarMesh): kiểm tra đường kính " + Num(m.WireDia) + " / mác " + m.Grade + " trong catalog rebar.");
+            object mesh = A.New(A.ModelType("RebarMesh"));
+            A.Set(mesh, "Father", father);
+            A.Set(mesh, "Polygon", poly);
+            A.Set(mesh, "MeshType", A.Enum("RebarMesh+RebarMeshTypeEnum", "POLYGON_MESH"));
+            A.Set(mesh, "Name", m.Name);
+            A.Set(mesh, "Grade", m.Grade);
+            A.Set(mesh, "Class", m.Class);
+            object ns = A.Get(mesh, "NumberingSeries");
+            A.Set(ns, "Prefix", m.Prefix);
+            A.Set(ns, "StartNumber", m.StartNo);
+            string dia = Num(m.WireDia);
+            A.Set(mesh, "LongitudinalSize", dia);
+            A.Set(mesh, "CrossSize", dia);
+            A.Set(mesh, "LongitudinalDistances", new ArrayList { m.Pitch });
+            A.Set(mesh, "CrossDistances", new ArrayList { m.Pitch });
+            A.Set(mesh, "StartPoint", A.Point(m.Polygon[0].X, m.Polygon[0].Y, zc));
+            A.Set(mesh, "EndPoint", A.Point(m.Polygon[1].X, m.Polygon[1].Y, zc));
+            object ok = A.Call(mesh, "Insert");
+            if (ok is bool && !(bool)ok) Messages.Add("Không tạo được lưới (RebarMesh): kiểm tra đường kính " + dia + " / mác " + m.Grade + " trong catalog rebar.");
         }
 
         // ------------------------------------------------------------------ vít / bu lông
-        private void InsertFasteners(MeshFramePlan plan, List<TSM.Beam> strips, TSM.Beam bar0)
+        private void InsertFasteners(MeshFramePlan plan, List<object> strips, object bar0)
         {
             for (int si = 0; si < plan.Strips.Count; si++)
             {
-                var pts = plan.Fasteners.FindAll(x => x.StripIndex == si);
+                List<PlanFastener> pts = plan.Fasteners.FindAll(x => x.StripIndex == si);
                 if (pts.Count == 0) continue;
                 if (pts[0].Kind != FastenKind.Screw) { Messages.Add("Hàn điểm: chưa ghi vào model (chỉ vít/bu lông)."); return; }
 
@@ -165,27 +172,23 @@ namespace MeshFrame.Tekla
                 double step = pts.Count > 1 ? (pts[1].Pos - pts[0].Pos).Length : 0;
                 V2 dir = pts.Count > 1 ? (pts[1].Pos - pts[0].Pos).Unit() : new V2(1, 0);
 
-                var bolt = new TSM.BoltArray();
-                bolt.PartToBeBolted = strips[si];
-                bolt.PartToBoltTo = bar0;
-                bolt.FirstPosition = Pt(first.Pos, first.ZTop);
-                bolt.SecondPosition = Pt(first.Pos + dir, first.ZTop);
-                bolt.BoltSize = first.Dia;
-                bolt.BoltStandard = Placement.BoltStandard;
-                bolt.Tolerance = 0;
-                bolt.BoltType = TSM.BoltGroup.BoltTypeEnum.BOLT_TYPE_WORKSHOP;
-                bolt.Length = first.Length;
-                bolt.AddBoltDistX(step);
-                for (int i = 1; i < pts.Count; i++) bolt.AddBoltDistX(step);
-                bolt.AddBoltDistY(0);
-                if (!bolt.Insert()) Messages.Add("Không tạo được vít trên nẹp " + (si + 1) + " (kiểm tra bolt standard '" + Placement.BoltStandard + "').");
+                object bolt = A.New(A.ModelType("BoltArray"));
+                A.Set(bolt, "PartToBeBolted", strips[si]);
+                A.Set(bolt, "PartToBoltTo", bar0);
+                A.Set(bolt, "FirstPosition", A.Point(first.Pos.X, first.Pos.Y, first.ZTop));
+                A.Set(bolt, "SecondPosition", A.Point(first.Pos.X + dir.X, first.Pos.Y + dir.Y, first.ZTop));
+                A.Set(bolt, "BoltSize", first.Dia);
+                A.Set(bolt, "BoltStandard", Placement.BoltStandard);
+                A.Set(bolt, "Tolerance", 0.0);
+                A.Set(bolt, "BoltType", A.Enum("BoltGroup+BoltTypeEnum", "BOLT_TYPE_WORKSHOP"));
+                A.Set(bolt, "Length", first.Length);
+                for (int i = 1; i < pts.Count; i++) A.Call(bolt, "AddBoltDistX", step);
+                A.Call(bolt, "AddBoltDistY", 0.0);
+                object ok = A.Call(bolt, "Insert");
+                if (ok is bool && !(bool)ok) Messages.Add("Không tạo được vít trên nẹp " + (si + 1) + " (kiểm tra bolt standard '" + Placement.BoltStandard + "').");
             }
         }
 
-        // ------------------------------------------------------------------ tiện ích
-        private static TSG.Point Pt(V2 v, double z) { return new TSG.Point(v.X, v.Y, z); }
-        private static TSG.Point G(V3 v) { return new TSG.Point(v.X, v.Y, v.Z); }
-        private static TSG.Vector Vc(V3 v) { return new TSG.Vector(v.X, v.Y, v.Z); }
         private static string Num(double d) { return d.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture); }
     }
 }
