@@ -1,0 +1,2 @@
+# Đổi tên thành MeshFrame.ini, để cạnh MeshFrame.exe. Chỉ cần khi exe không tự tìm ra Tekla.
+TeklaBin=C:\TeklaStructures\2025.0\bin

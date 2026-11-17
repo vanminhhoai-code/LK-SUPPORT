@@ -12,6 +12,7 @@
     <Compile Remove="Tests/**" />
     <Compile Remove="old/**" />
     <Compile Remove="Tekla/**" />
+    <Compile Remove="App/**" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Drawing" />
   </ItemGroup>

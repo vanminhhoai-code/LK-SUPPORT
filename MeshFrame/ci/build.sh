@@ -16,5 +16,7 @@ for v in ${TEKLA_PKG_VERSIONS:-2021.0.0 2025.0.0}; do
   TS=$(ls "$OUT"/$v/tekla.structures/lib/net*/Tekla.Structures.dll | grep -v netstandard | head -1)
   TM=$(ls "$OUT"/$v/tekla.structures.model/lib/net*/Tekla.Structures.Model.dll | grep -v netstandard | head -1)
   mcs -target:library -out:"$OUT/MeshFrame.Tekla.$v.dll" -r:"$TS" -r:"$TM" -r:System.Core.dll Core/*.cs Tekla/*.cs
+  echo "== MeshFrame.exe (app đầy đủ) vs $v"
+  mcs -target:winexe -out:"$OUT/MeshFrame.$v.exe" -r:"$TS" -r:"$TM" -r:System.Core.dll -r:System.Windows.Forms.dll -r:System.Drawing.dll Core/*.cs UI/*.cs Tekla/*.cs App/*.cs
 done
 echo "OK"

@@ -17,4 +17,10 @@ var r = MeshFrameBuilder.Build(s, corners /*V3[4], toạ độ GLOBAL*/, writer)
 // writer = TeklaModelWriter nạp từ out\<phiên bản>\MeshFrame.Tekla.dll
 ```
 
-`build-writer.bat` biên dịch `MeshFrame.Tekla.dll` cho 21.1 / 2020 / 2025 (cùng một mã nguồn).
+## Chạy app (PC có Tekla)
+
+1. `build-app.bat` -> `out\21.1`, `out\2020`, `out\2025`, mỗi thư mục có `MeshFrame.exe` (+ `MeshFrame.ini` trỏ đúng thư mục Tekla).
+2. Mở Tekla + model, chạy `MeshFrame.exe` của đúng phiên bản.
+3. Nhập thông số -> OK -> pick 4 điểm trong Tekla (ngược chiều kim đồng hồ nhìn từ trên) -> tạo. Thông số được nhớ ở `%APPDATA%\MeshFrame\settings.ini`.
+
+Kiểm tra không cần Tekla (Linux/CI): `ci/build.sh` (test Core, build UI, compile app + bộ ghi với DLL Tekla 2021 và 2025 từ NuGet).

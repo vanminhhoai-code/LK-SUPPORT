@@ -92,6 +92,16 @@ static class PlanTests
         var bad = new[] { new V3(0, 0, 0), new V3(4000, 0, 0), new V3(4000, 1200, 500), new V3(0, 1200, 0) };
         Check("khong dong phang bao loi", !MeshFrameBuilder.Build(new MeshFrameSettings(), bad, null).Success);
 
+        // --- luu / nap thong so
+        var cfg = new MeshFrameSettings { VLegA = 40.5, StiffMode = StiffMode.Custom, StiffCells = "800 2*1500", UseStrip = false, Fasten = FastenKind.SpotWeld, MeshName = "TEST" };
+        string tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "meshframe_test_" + Guid.NewGuid().ToString("N") + ".ini");
+        SettingsStore.Save(cfg, tmp);
+        var back = SettingsStore.Load(tmp);
+        System.IO.File.Delete(tmp);
+        Check("luu/nap thong so", Near(back.VLegA, 40.5, 1e-12) && back.StiffMode == StiffMode.Custom && back.StiffCells == "800 2*1500"
+              && !back.UseStrip && back.Fasten == FastenKind.SpotWeld && back.MeshName == "TEST");
+        Check("nap file khong ton tai = mac dinh", Near(SettingsStore.Load("/khong/co/file.ini").VLegA, 50, 1e-12));
+
         Console.WriteLine("pass " + pass + " fail " + fail);
         return fail == 0 ? 0 : 1;
     }
