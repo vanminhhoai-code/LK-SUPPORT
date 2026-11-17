@@ -31,7 +31,7 @@ namespace MeshFrame.UI
             set
             {
                 foreach (FieldInfo f in typeof(MeshFrameSettings).GetFields(BindingFlags.Public | BindingFlags.Instance)) f.SetValue(_s, f.GetValue(value));
-                Load();
+                PushToControls();
             }
         }
 
@@ -82,7 +82,7 @@ namespace MeshFrame.UI
             Controls.Add(buttons);
 
             foreach (TextBox t in new[] { _pvL, _pvH, _pvSkew }) t.TextChanged += delegate { Changed(); };
-            Load();
+            PushToControls();
         }
 
         // ------------------------------------------------------------ các tab
@@ -161,7 +161,7 @@ namespace MeshFrame.UI
         }
 
         // ------------------------------------------------------------ đọc / ghi / bật tắt / xem trước
-        private void Load()
+        private void PushToControls()
         {
             _loading = true;
             foreach (var kv in _ctl)
