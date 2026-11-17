@@ -45,8 +45,19 @@ namespace MeshFrame.App
                 }
                 try { SettingsStore.Save(settings, SettingsPath); } catch (IOException) { } catch (UnauthorizedAccessException) { }
 
-                V3[] corners = PickCorners(api, model);
-                if (corners == null) continue;               // hủy pick -> quay lại hộp thoại
+                PickResult pick;
+                try { pick = TeklaPicker.PickCorners(api, model); }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Lỗi khi đọc điểm pick:\n" + Root(ex).GetType().Name + ": " + Root(ex).Message, title, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    continue;
+                }
+                if (!pick.Complete)                          // Esc / Tekla dừng pick -> nói rõ, rồi quay lại hộp thoại
+                {
+                    MessageBox.Show("Pick dừng ở " + pick.Picked + "/4 điểm, chưa tạo gì.\n" + pick.StopReason, title, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    continue;
+                }
+                V3[] corners = pick.Corners;
 
                 var writer = new TeklaModelWriter(api, model);
                 BuildResult r;
@@ -59,28 +70,6 @@ namespace MeshFrame.App
                 Report(r, writer, title);
             }
             return 0;
-        }
-
-        /// <summary>Pick 4 điểm trong Tekla (theo work plane hiện hành) rồi đổi sang toạ độ GLOBAL. Hủy pick -> null.</summary>
-        private static V3[] PickCorners(TeklaApi api, object model)
-        {
-            try
-            {
-                object picker = api.New(api.ModelType("UI.Picker"));
-                object toGlobal = api.Get(api.Call(api.Call(model, "GetWorkPlaneHandler"), "GetCurrentTransformationPlane"), "TransformationMatrixToGlobal");
-                var c = new V3[4];
-                for (int i = 0; i < 4; i++)
-                {
-                    object p = api.Call(picker, "PickPoint", "MeshFrame: pick điểm P" + (i + 1) + " / 4 (đi liên tiếp quanh khung, ngược chiều kim đồng hồ nhìn từ trên)");
-                    object g = api.Call(toGlobal, "Transform", p);
-                    c[i] = new V3(api.GetDouble(g, "X"), api.GetDouble(g, "Y"), api.GetDouble(g, "Z"));
-                }
-                return c;
-            }
-            catch (Exception)                                   // Tekla ném lỗi khi người dùng nhấn Esc / hủy pick
-            {
-                return null;
-            }
         }
 
         private static void Report(BuildResult r, TeklaModelWriter w, string title)

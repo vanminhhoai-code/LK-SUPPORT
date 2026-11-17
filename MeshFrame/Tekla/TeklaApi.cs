@@ -61,6 +61,8 @@ namespace MeshFrame.Tekla
             {
                 PropertyInfo p = l.GetProperty(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
                 if (p != null && p.GetIndexParameters().Length == 0) { Note("get " + target.GetType().FullName + "::" + name); return Run(delegate { return p.GetValue(target, null); }); }
+                FieldInfo f = l.GetField(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);   // vd Point.X
+                if (f != null) { Note("get " + target.GetType().FullName + "::" + name); return Run(delegate { return f.GetValue(target); }); }
             }
             throw new MissingMemberException(target.GetType().FullName, name);
         }
@@ -72,11 +74,21 @@ namespace MeshFrame.Tekla
             for (Type l = target.GetType(); l != null; l = l.BaseType)
             {
                 PropertyInfo p = l.GetProperty(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-                if (p == null || p.GetIndexParameters().Length != 0) continue;
-                Note("set " + target.GetType().FullName + "::" + name + "=" + Chain(value));
-                object v = Coerce(p.PropertyType, value);
-                Run(delegate { p.SetValue(target, v, null); return null; });
-                return;
+                if (p != null && p.GetIndexParameters().Length == 0)
+                {
+                    Note("set " + target.GetType().FullName + "::" + name + "=" + Chain(value));
+                    object v = Coerce(p.PropertyType, value);
+                    Run(delegate { p.SetValue(target, v, null); return null; });
+                    return;
+                }
+                FieldInfo f = l.GetField(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+                if (f != null)
+                {
+                    Note("set " + target.GetType().FullName + "::" + name + "=" + Chain(value));
+                    object v = Coerce(f.FieldType, value);
+                    Run(delegate { f.SetValue(target, v); return null; });
+                    return;
+                }
             }
             throw new MissingMemberException(target.GetType().FullName, name);
         }

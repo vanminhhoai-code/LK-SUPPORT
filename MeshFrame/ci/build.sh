@@ -13,7 +13,7 @@ echo "== Bộ ghi trên SDK giả"
 FAKE="$OUT/fake"; mkdir -p "$FAKE"
 mcs -target:library -out:"$FAKE/Tekla.Structures.dll" Tests/FakeSdk/FakeGeo.cs
 mcs -target:library -out:"$FAKE/Tekla.Structures.Model.dll" -r:"$FAKE/Tekla.Structures.dll" Tests/FakeSdk/FakeModel.cs
-mcs -out:"$FAKE/WriterTests.exe" -r:"$FAKE/Tekla.Structures.Model.dll" -r:System.Core.dll Core/*.cs Tekla/TeklaApi.cs Tekla/TeklaModelWriter.cs Tests/WriterTests.cs
+mcs -out:"$FAKE/WriterTests.exe" -r:"$FAKE/Tekla.Structures.Model.dll" -r:System.Core.dll Core/*.cs Tekla/*.cs Tests/WriterTests.cs
 mono "$FAKE/WriterTests.exe" "$FAKE" "$OUT/members.txt"
 
 echo "== Đối chiếu hợp đồng với DLL Tekla thật"

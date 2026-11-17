@@ -77,9 +77,17 @@ static class ContractCheck
                     else if (kind == "get" || kind == "set")
                     {
                         string name = kind == "set" ? m.Substring(0, m.IndexOf('=')) : m;
-                        PropertyInfo p = null;
-                        for (Type l = t; l != null && p == null; l = l.BaseType) p = l.GetProperty(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-                        if (p == null) err = "không có thuộc tính " + name;
+                        PropertyInfo p = null; FieldInfo fi = null;
+                        for (Type l = t; l != null && p == null && fi == null; l = l.BaseType)
+                        {
+                            p = l.GetProperty(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+                            if (p == null) fi = l.GetField(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+                        }
+                        if (p == null && fi != null)
+                        {
+                            if (kind == "set" && !Compat(fi.FieldType, m.Substring(m.IndexOf('=') + 1))) err = "kiểu " + fi.FieldType.FullName + " không nhận " + m.Substring(m.IndexOf('=') + 1);
+                        }
+                        else if (p == null) err = "không có thuộc tính/field " + name;
                         else if (kind == "get" && !p.CanRead) err = "thuộc tính không đọc được";
                         else if (kind == "set")
                         {

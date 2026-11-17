@@ -5,7 +5,7 @@ using Tekla.Structures.Geometry3d;
 
 namespace Tekla.Structures.Model
 {
-    public static class FakeLog { public static readonly List<string> Entries = new List<string>(); public static bool RejectInsert; public static void Add(string s) { Entries.Add(s); } }
+    public static class FakeLog { public static readonly List<string> Entries = new List<string>(); public static bool RejectInsert; public static int PickFailAt = -1; public static int Picked; public static void Add(string s) { Entries.Add(s); } }
 
     public class Profile { public string ProfileString { get; set; } }
     public class Material { public string MaterialString { get; set; } }
@@ -77,4 +77,15 @@ namespace Tekla.Structures.Model
         public bool CommitChanges() { FakeLog.Add("Commit"); return true; }
     }
 }
-namespace Tekla.Structures.Model.UI { public class Picker { public Tekla.Structures.Geometry3d.Point PickPoint(string prompt) { return new Tekla.Structures.Geometry3d.Point(1, 2, 3); } } }
+namespace Tekla.Structures.Model.UI
+{
+    public class Picker
+    {
+        public Tekla.Structures.Geometry3d.Point PickPoint(string prompt)
+        {
+            if (FakeLog.Picked == FakeLog.PickFailAt) throw new System.ApplicationException("User interrupted");
+            FakeLog.Picked++;
+            return new Tekla.Structures.Geometry3d.Point(FakeLog.Picked * 100, FakeLog.Picked * 10, 5);
+        }
+    }
+}

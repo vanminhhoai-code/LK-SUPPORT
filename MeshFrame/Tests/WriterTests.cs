@@ -58,6 +58,15 @@ static class WriterTests
         Check("Insert false -> loi nhac kiem tra profile", threw);
         Check("loi van tra mat phang + commit", Count("SetPlane") == 2 && Count("Commit") == 1);
 
+        // --- pick 4 điểm (hồi quy: Point.X/Y/Z là FIELD, trước đây lỗi sau lần pick đầu)
+        FakeLog.Picked = 0; FakeLog.PickFailAt = -1;
+        PickResult pr = TeklaPicker.PickCorners(api, new Tekla.Structures.Model.Model());
+        Check("pick du 4 diem", pr.Complete && pr.Picked == 4 && pr.Corners[3].X == 400 && pr.Corners[0].Y == 10 && pr.Corners[0].Z == 5);
+        FakeLog.Picked = 0; FakeLog.PickFailAt = 1;                    // Esc ở điểm thứ 2
+        pr = TeklaPicker.PickCorners(api, new Tekla.Structures.Model.Model());
+        Check("Esc o diem 2: dung, noi ro ly do", !pr.Complete && pr.Picked == 1 && pr.StopReason != null && pr.StopReason.Contains("interrupted"));
+        FakeLog.PickFailAt = -1;
+
         // --- SdkThread hook
         int hooked = 0;
         api.Invoke = delegate (Func<object> f) { hooked++; return f(); };
