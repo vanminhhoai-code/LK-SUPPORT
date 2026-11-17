@@ -38,6 +38,7 @@ namespace MeshFrame.Core
         public double ZBottom, Thickness, WireDia, Pitch, WeightKgPerM2;   // lưới nằm dưới cánh nằm V: Z từ ZBottom (<0) đến 0
         public string Grade, Name, Prefix;
         public int Class, StartNo;
+        public MeshKind Kind;
     }
 
     public class PlanFastener
@@ -53,6 +54,7 @@ namespace MeshFrame.Core
     {
         public string VPlane, VRotation, VDepth, StripPlane, StripRotation, StripDepth;
         public bool FlipMiterCut, FlipBolt;
+        public double VLateral, StripLateral;
         public string BoltStandard;
         public static string Name(PlaneKind k) { return k.ToString().ToUpperInvariant(); }
         public static string Name(RotationKind k) { return k.ToString().ToUpperInvariant(); }

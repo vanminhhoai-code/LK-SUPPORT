@@ -9,6 +9,7 @@ namespace MeshFrame.Core
     public enum FastenKind { None = 0, Screw = 1, SpotWeld = 2 }
     public enum StiffMode { None = 0, Equal = 1, Custom = 2 }
     public enum StiffDir { AcrossP1P2 = 0, AcrossP1P4 = 1 }
+    public enum MeshKind { Plate = 0, RebarMesh = 1, None = 2 }   // lưới: tấm mỏng / Reinforcement Mesh / không tạo
     // Hướng đặt thép góc / nẹp trong Tekla (Position.Plane / Rotation / Depth). Thứ tự khớp tên enum Tekla.
     public enum PlaneKind { Left = 0, Middle = 1, Right = 2 }
     public enum RotationKind { Front = 0, Top = 1, Back = 2, Below = 3 }
@@ -33,6 +34,7 @@ namespace MeshFrame.Core
         public int SStartNo = 1;
 
         // ---- Lưới
+        public MeshKind MeshKind = MeshKind.Plate;        // mặc định tấm mỏng (luôn tạo được); RebarMesh cần đủ thuộc tính
         public double MeshGap = 0, MeshWireDia = 0.37, MeshPitch = 2.37;   // MeshGap: lưới lùi vào so với MÉP NGOÀI khung; chuẩn: ô 2x2, sợi 0.37
         public string MeshName = "LUOI INOX 2x2", MeshGrade = "SUS304", MeshPrefix = "LI";
         public int MeshClass = 6, MeshStartNo = 1;
@@ -47,9 +49,10 @@ namespace MeshFrame.Core
         // ---- Tekla: profile (để trống = tự tạo), bolt standard, hướng đặt. Chỉnh khi kết quả trong Tekla lệch.
         public string VProfile = "", StripProfile = "";   // trống = tự tạo; V gia cường dùng chung profile V khung
         public string BoltStandard = "8.8XOX";
-        public PlaneKind VPlane = PlaneKind.Left, StripPlane = PlaneKind.Middle;
+        public PlaneKind VPlane = PlaneKind.Middle, StripPlane = PlaneKind.Middle;   // Middle: đặt theo tim -> V và nẹp trùng tim
         public RotationKind VRotation = RotationKind.Front, StripRotation = RotationKind.Front;
-        public DepthKind VDepth = DepthKind.Front, StripDepth = DepthKind.Front;
+        public DepthKind VDepth = DepthKind.Middle, StripDepth = DepthKind.Middle;
+        public double VLateral = 0, StripLateral = 0;   // lệch ngang tinh chỉnh (mm, dương = vào trong khung)
         public bool FlipMiterCut = false;
         public bool FlipBolt = false;   // đảo chiều vít nếu vít ra ngược
 

@@ -126,12 +126,20 @@ static class PlanTests
         s = new MeshFrameSettings { VProfile = "L50x50x3", StripProfile = "PL3*30" };
         p = Plan(s, 4000, 1200, 0);
         Check("profile ghi de: V khung + gia cuong + nep", p.Bars.All(b => b.Profile == "L50x50x3") && p.Strips.All(x => x.Profile == "PL3*30"));
-        Check("huong dat mac dinh dang ten enum Tekla", p.Placement.VPlane == "LEFT" && p.Placement.VRotation == "FRONT" && p.Placement.StripDepth == "FRONT" && p.Placement.BoltStandard == "8.8XOX");
+        Check("huong dat mac dinh dang ten enum Tekla", p.Placement.VPlane == "MIDDLE" && p.Placement.VRotation == "FRONT" && p.Placement.VDepth == "MIDDLE" && p.Placement.StripPlane == "MIDDLE" && p.Placement.StripDepth == "MIDDLE" && p.Placement.BoltStandard == "8.8XOX");
         p = Plan(new MeshFrameSettings { VPlane = PlaneKind.Right, VRotation = RotationKind.Below, VDepth = DepthKind.Middle, FlipMiterCut = true, FlipBolt = true }, 4000, 1200, 0);
         Check("huong dat doi theo thong so", p.Placement.VPlane == "RIGHT" && p.Placement.VRotation == "BELOW" && p.Placement.VDepth == "MIDDLE" && p.Placement.FlipMiterCut && p.Placement.FlipBolt);
         p = Plan(new MeshFrameSettings { VName = "KHUNG LƯỚI", MeshName = "Lưới" }, 4000, 1200, 0);
         Check("chu co dau -> canh bao", p.Warnings.Any(w => w.Contains("VName") && w.Contains("MeshName")));
         Check("mac dinh khong canh bao ASCII", !Plan(new MeshFrameSettings(), 4000, 1200, 0).Warnings.Any(w => w.Contains("ASCII")));
+
+        // --- kiểu lưới
+        Check("mac dinh luoi dang tam mong", Plan(new MeshFrameSettings(), 4000, 1200, 0).Mesh.Kind == MeshKind.Plate);
+        Check("RebarMesh duoc chon", Plan(new MeshFrameSettings { MeshKind = MeshKind.RebarMesh }, 4000, 1200, 0).Mesh.Kind == MeshKind.RebarMesh);
+        p = Plan(new MeshFrameSettings { MeshKind = MeshKind.None }, 4000, 1200, 0);
+        Check("khong tao luoi: Mesh = null, nep + vit van co", p.Mesh == null && p.Strips.Count == 7 && p.Fasteners.Count > 0 && Near(p.Strips[0].ZRef, -0.74, 1e-9));
+        p = Plan(new MeshFrameSettings { VLateral = 1.5, StripLateral = -2 }, 4000, 1200, 0);
+        Check("lech ngang chuyen sang placement", Near(p.Placement.VLateral, 1.5, 0) && Near(p.Placement.StripLateral, -2, 0));
 
         // --- Builder 3D + Frame
         var corners = new[] { new V3(0, 0, 5000), new V3(4000, 0, 5000), new V3(4000, 1200, 5000), new V3(0, 1200, 5000) };
@@ -152,7 +160,7 @@ static class PlanTests
               && !back.UseStrip && back.Fasten == FastenKind.SpotWeld && back.MeshName == "TEST" && Near(back.StripThk, 1.5, 1e-12));
         var cfg2 = new MeshFrameSettings { VPlane = PlaneKind.Right, StripDepth = DepthKind.Behind, FlipMiterCut = true, FlipBolt = true, BoltStandard = "7990", VProfile = "L50x50x3" };
         SettingsStore.Save(cfg2, tmp); var back2 = SettingsStore.Load(tmp); System.IO.File.Delete(tmp);
-        Check("luu/nap huong dat + profile + bolt", back2.VPlane == PlaneKind.Right && back2.StripDepth == DepthKind.Behind && back2.FlipMiterCut && back2.FlipBolt && back2.BoltStandard == "7990" && back2.VProfile == "L50x50x3");
+        Check("luu/nap huong dat + profile + bolt", back2.VPlane == PlaneKind.Right && back2.StripDepth == DepthKind.Behind && back2.MeshKind == MeshKind.Plate && back2.FlipMiterCut && back2.FlipBolt && back2.BoltStandard == "7990" && back2.VProfile == "L50x50x3");
         Check("nap file khong ton tai = mac dinh", Near(SettingsStore.Load("/khong/co/file.ini").VLegA, 25, 1e-12));
 
         Console.WriteLine("pass " + pass + " fail " + fail);

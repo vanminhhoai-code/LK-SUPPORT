@@ -1,5 +1,8 @@
 // Ghi MeshFramePlan vào Tekla qua TeklaApi (reflection) -> một bản chạy cho 21.1 / 2020 / 2025.
 // Mọi thành viên Tekla được dùng đều bị test hợp đồng (Tests/) đối chiếu với DLL thật khi chạy ci/build.sh.
+//
+// Độ bền: lỗi nặng (thanh V / nẹp không tạo được) -> xóa mọi thứ đã tạo rồi ném lỗi (không để model dở dang).
+//         lỗi nhẹ (lưới, vít, gộp assembly) -> ghi cảnh báo vào Messages và vẫn hoàn tất phần còn lại.
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -11,7 +14,8 @@ namespace MeshFrame.Tekla
     {
         private readonly TeklaApi A;
         private readonly object _model;
-        private PlanPlacement P;                     // cách đặt lấy từ plan (chỉnh trong tab Tekla)
+        private PlanPlacement P;                              // cách đặt lấy từ plan (chỉnh trong tab Tekla)
+        private readonly List<object> _created = new List<object>();
         public readonly List<string> Messages = new List<string>();
 
         /// <param name="model">Đối tượng Tekla.Structures.Model.Model đã có (Cover Tool: model của gateway); null = tạo mới.</param>
@@ -24,6 +28,7 @@ namespace MeshFrame.Tekla
         public void Write(MeshFramePlan plan, Frame f)
         {
             P = plan.Placement;
+            _created.Clear();
             object wph = A.Call(_model, "GetWorkPlaneHandler");
             object old = A.Call(wph, "GetCurrentTransformationPlane");
             try
@@ -34,23 +39,45 @@ namespace MeshFrame.Tekla
                 A.Call(wph, "SetCurrentTransformationPlane", tp);
 
                 var bars = new List<object>();
-                foreach (PlanBar b in plan.Bars) bars.Add(InsertBar(b));
+                var strips = new List<object>();
+                try
+                {
+                    foreach (PlanBar b in plan.Bars) bars.Add(InsertBar(b));
+                    foreach (PlanStrip s in plan.Strips) strips.Add(InsertStrip(s));
+                }
+                catch (Exception)
+                {
+                    Rollback();                                // lỗi nặng: không để lại model dở dang
+                    throw;
+                }
                 if (bars.Count == 0) return;
 
-                var strips = new List<object>();
-                foreach (PlanStrip s in plan.Strips) strips.Add(InsertStrip(s));
+                object meshPart = null;
+                if (plan.Mesh != null)
+                {
+                    try { meshPart = InsertMesh(plan.Mesh, bars[0]); }
+                    catch (Exception ex) { Messages.Add("Lưới (" + plan.Mesh.Kind + ") không tạo được: " + Root(ex).Message + ". Các phần khác vẫn được tạo."); }
+                }
 
-                if (plan.Mesh != null) InsertMesh(plan.Mesh, bars[0]);
-                if (plan.Fasteners.Count > 0) InsertFasteners(plan, strips, bars[0]);
+                if (plan.Fasteners.Count > 0)
+                {
+                    try { InsertFasteners(plan, strips, bars[0]); }
+                    catch (Exception ex) { Messages.Add("Vít không tạo được: " + Root(ex).Message + ". Các phần khác vẫn được tạo."); }
+                }
 
                 // Gộp thành 1 assembly, main = V khung đầu tiên
-                object asm = A.Call(bars[0], "GetAssembly");
-                for (int i = 1; i < bars.Count; i++) A.Call(asm, "Add", bars[i]);
-                foreach (object sp in strips) A.Call(asm, "Add", sp);
-                object num = A.Get(asm, "AssemblyNumber");
-                A.Set(num, "Prefix", plan.AsmPrefix);
-                A.Set(num, "StartNumber", plan.AsmStartNo);
-                A.Call(asm, "Modify");
+                try
+                {
+                    object asm = A.Call(bars[0], "GetAssembly");
+                    for (int i = 1; i < bars.Count; i++) A.Call(asm, "Add", bars[i]);
+                    foreach (object sp in strips) A.Call(asm, "Add", sp);
+                    if (meshPart != null) A.Call(asm, "Add", meshPart);        // lưới dạng tấm là part; RebarMesh thuộc part cha
+                    object num = A.Get(asm, "AssemblyNumber");
+                    A.Set(num, "Prefix", plan.AsmPrefix);
+                    A.Set(num, "StartNumber", plan.AsmStartNo);
+                    A.Call(asm, "Modify");
+                }
+                catch (Exception ex) { Messages.Add("Chưa gộp được assembly: " + Root(ex).Message); }
             }
             finally
             {
@@ -59,27 +86,44 @@ namespace MeshFrame.Tekla
             }
         }
 
+        private void Rollback()
+        {
+            for (int i = _created.Count - 1; i >= 0; i--)
+            {
+                try { A.Call(_created[i], "Delete"); } catch (Exception) { }
+            }
+            _created.Clear();
+        }
+
         // ------------------------------------------------------------------ thanh V / nẹp
+        /// <summary>Đường tham chiếu của V trong Tekla: On plane = Middle thì đặt theo tim cánh nằm (cách mép ngoài legA/2 vào trong),
+        /// At depth = Middle thì theo tim chiều cao (legB/2); cộng thêm lệch ngang người dùng nhập.</summary>
         private object InsertBar(PlanBar bar)
         {
-            object beam = NewBeam(bar.Start, bar.End, bar.ZRef);
-            Describe(beam, bar.Profile, bar.Material, bar.Name, bar.Class, bar.Prefix, bar.StartNo,
-                     P.VPlane, P.VRotation, P.VDepth);
+            V2 n = (bar.End - bar.Start).Unit().Left();                       // phía cánh nằm (vào trong khung)
+            double lat = (P.VPlane == "MIDDLE" ? bar.LegA / 2 : 0) + P.VLateral;
+            double dz = P.VDepth == "MIDDLE" ? bar.LegB / 2 : 0;
+            object beam = NewBeam(bar.Start + n * lat, bar.End + n * lat, bar.ZRef + dz);
+            Describe(beam, bar.Profile, bar.Material, bar.Name, bar.Class, bar.Prefix, bar.StartNo, P.VPlane, P.VRotation, P.VDepth);
             A.Require(beam, "Insert", "thanh " + bar.Profile + " (kiểm tra profile trong catalog)");
-            AddMiter(beam, bar.Start, bar.CutStart, bar.ZRef);
-            AddMiter(beam, bar.End, bar.CutEnd, bar.ZRef);
+            _created.Add(beam);
+            AddMiter(beam, bar.Start, bar.CutStart);
+            AddMiter(beam, bar.End, bar.CutEnd);
             foreach (V2[] notch in bar.Notches) AddNotch(beam, notch, bar.Thk, bar.Material);
             return beam;
         }
 
         private object InsertStrip(PlanStrip st)
         {
-            object beam = NewBeam(st.Start, st.End, st.ZRef);
-            Describe(beam, st.Profile, st.Material, st.Name, st.Class, st.Prefix, st.StartNo,
-                     P.StripPlane, P.StripRotation, P.StripDepth);
+            V2 n = (st.End - st.Start).Unit().Left();
+            double lat = P.StripLateral;
+            double dz = P.StripDepth == "MIDDLE" ? -st.Thk / 2 : 0;           // nẹp nằm phía ngoài (-Z) mặt tiếp xúc lưới
+            object beam = NewBeam(st.Start + n * lat, st.End + n * lat, st.ZRef + dz);
+            Describe(beam, st.Profile, st.Material, st.Name, st.Class, st.Prefix, st.StartNo, P.StripPlane, P.StripRotation, P.StripDepth);
             A.Require(beam, "Insert", "nẹp " + st.Profile + " (kiểm tra profile trong catalog)");
-            AddMiter(beam, st.Start, st.CutStart, st.ZRef);
-            AddMiter(beam, st.End, st.CutEnd, st.ZRef);
+            _created.Add(beam);
+            AddMiter(beam, st.Start, st.CutStart);
+            AddMiter(beam, st.End, st.CutEnd);
             return beam;
         }
 
@@ -104,8 +148,8 @@ namespace MeshFrame.Tekla
             A.Set(pos, "Depth", A.Enum("Position+DepthEnum", depth));
         }
 
-        /// <summary>Cắt vát đầu thanh bằng Fitting: mặt phẳng chứa hướng phân giác và pháp tuyến Z.</summary>
-        private void AddMiter(object beam, V2 end, V2? cutDir, double z)
+        /// <summary>Cắt vát đầu thanh bằng Fitting: mặt phẳng đi qua góc khung, chứa hướng phân giác và pháp tuyến Z.</summary>
+        private void AddMiter(object beam, V2 corner, V2? cutDir)
         {
             if (!cutDir.HasValue) return;
             V2 d = cutDir.Value;
@@ -113,7 +157,7 @@ namespace MeshFrame.Tekla
             object fit = A.New(A.ModelType("Fitting"));
             A.Set(fit, "Father", beam);
             object plane = A.New(A.ModelType("Plane"));
-            A.Set(plane, "Origin", A.Point(end.X, end.Y, z));
+            A.Set(plane, "Origin", A.Point(corner.X, corner.Y, 0));
             A.Set(plane, "AxisX", A.Vector(d.X, d.Y, 0));
             A.Set(plane, "AxisY", A.Vector(0, 0, 1));
             A.Set(fit, "Plane", plane);
@@ -141,8 +185,32 @@ namespace MeshFrame.Tekla
             A.Call(cutter, "Delete");
         }
 
-        // ------------------------------------------------------------------ lưới (Reinforcement Mesh)
-        private void InsertMesh(PlanMesh m, object father)
+        // ------------------------------------------------------------------ lưới
+        private object InsertMesh(PlanMesh m, object father)
+        {
+            return m.Kind == MeshKind.RebarMesh ? InsertRebarMesh(m, father) : InsertMeshPlate(m);
+        }
+
+        /// <summary>Lưới dạng tấm mỏng (ContourPlate dày = 2 lớp sợi) nằm dưới cánh nằm V, phía ngoài. Khối lượng: nhập tay.</summary>
+        private object InsertMeshPlate(PlanMesh m)
+        {
+            double zc = m.ZBottom + m.Thickness / 2;
+            object cp = A.New(A.ModelType("ContourPlate"));
+            foreach (V2 v in m.Polygon)
+                A.Call(cp, "AddContourPoint", A.New(A.ModelType("ContourPoint"), A.Point(v.X, v.Y, zc), null));
+            A.Set(A.Get(cp, "Profile"), "ProfileString", "PL" + Num(m.Thickness));
+            A.Set(A.Get(cp, "Material"), "MaterialString", m.Grade);
+            A.Set(cp, "Name", m.Name);
+            A.Set(cp, "Class", m.Class.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            object pn = A.Get(cp, "PartNumber");
+            A.Set(pn, "Prefix", m.Prefix);
+            A.Set(pn, "StartNumber", m.StartNo);
+            A.Set(A.Get(cp, "Position"), "Depth", A.Enum("Position+DepthEnum", "MIDDLE"));
+            A.Require(cp, "Insert", "tấm lưới (kiểm tra mác thép/profile PL" + Num(m.Thickness) + ")");
+            return cp;
+        }
+
+        private object InsertRebarMesh(PlanMesh m, object father)
         {
             double zc = m.ZBottom + m.Thickness / 2;
             object poly = A.New(A.ModelType("Polygon"));
@@ -166,8 +234,8 @@ namespace MeshFrame.Tekla
             A.Set(mesh, "CrossDistances", new ArrayList { m.Pitch });
             A.Set(mesh, "StartPoint", A.Point(m.Polygon[0].X, m.Polygon[0].Y, zc));
             A.Set(mesh, "EndPoint", A.Point(m.Polygon[1].X, m.Polygon[1].Y, zc));
-            object ok = A.Call(mesh, "Insert");
-            if (ok is bool && !(bool)ok) Messages.Add("Không tạo được lưới (RebarMesh): kiểm tra đường kính " + dia + " / mác " + m.Grade + " trong catalog rebar.");
+            A.Require(mesh, "Insert", "RebarMesh đường kính " + dia + " mác " + m.Grade);
+            return null;                                                    // RebarMesh không phải part: không đưa vào assembly
         }
 
         // ------------------------------------------------------------------ vít / bu lông
@@ -202,5 +270,6 @@ namespace MeshFrame.Tekla
         }
 
         private static string Num(double d) { return d.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture); }
+        private static Exception Root(Exception e) { while (e.InnerException != null) e = e.InnerException; return e; }
     }
 }

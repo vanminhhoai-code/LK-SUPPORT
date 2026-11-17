@@ -16,7 +16,8 @@ Một `MeshFrame.exe` cho **Tekla 21.1 / 2020 / 2025**: API Tekla nạp lúc ch�
 1. `build-app.bat` -> `out\MeshFrame.exe` + `Start-Tekla21.1.bat` / `Start-Tekla2020.bat` / `Start-Tekla2025.bat`.
 2. Mở Tekla + model, chạy file `Start-Tekla<bản>.bat` tương ứng (hoặc `MeshFrame.exe --tekla-version=2025`).
    Không chỉ bản thì thử lần lượt 2025, 2020, 21.1. Tự tìm API ở `nt\bin\plugins` (21.1, 2020) hoặc `bin` (2025); chỉ tay bằng `--tekla-bin=` hoặc `MeshFrame.ini`.
-3. Tab **Tekla**: ghi đè tên profile, bolt standard, hướng đặt thép góc/nẹp (On plane / Rotation / At depth), đảo phía cắt vát - chỉnh khi kết quả trong Tekla lệch; dùng chữ không dấu cho ô gửi sang Tekla.
+3. Tab **Lưới**: kiểu lưới *Tấm mỏng* (mặc định, luôn tạo được) / *RebarMesh* / *Không tạo*. Lỗi lưới hoặc vít chỉ hiện cảnh báo, vẫn gộp assembly; lỗi nặng (thanh V/nẹp) tự xóa phần đã tạo.
+3. Tab **Tekla**: nút *Đọc lưới mẫu đang chọn* ghi mọi thuộc tính của đối tượng chọn trong Tekla ra `%APPDATA%\MeshFrame\selected-object.txt` (để chép đúng thuộc tính RebarMesh); ô *Lệch ngang* cho V và nẹp; ghi đè tên profile, bolt standard, hướng đặt thép góc/nẹp (On plane / Rotation / At depth), đảo phía cắt vát - chỉnh khi kết quả trong Tekla lệch; dùng chữ không dấu cho ô gửi sang Tekla.
 4. Nhập thông số -> OK -> pick 4 điểm trong Tekla (ngược chiều kim đồng hồ nhìn từ trên). Thông số nhớ ở `%APPDATA%\MeshFrame\settings.ini`.
 
 ## Kiểm tra (không cần Tekla): `ci/build.sh`

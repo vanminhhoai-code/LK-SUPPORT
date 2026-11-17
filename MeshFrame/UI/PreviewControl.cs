@@ -41,15 +41,18 @@ namespace MeshFrame.UI
             System.Func<V2, PointF> T = p => new PointF((float)(ox + (p.X - minX) * k), (float)(Height - (oy + (p.Y - minY) * k)));
             System.Func<V2[], PointF[]> TA = a => { var r = new PointF[a.Length]; for (int i = 0; i < a.Length; i++) r[i] = T(a[i]); return r; };
 
-            if (_plan == null || _plan.Mesh == null)
+            if (_plan == null)
             {
                 using (var pen = new Pen(Color.Gray)) g.DrawPolygon(pen, TA(_poly));
                 return;
             }
 
             // lưới
-            using (var br = new SolidBrush(Color.FromArgb(120, 135, 190, 230))) g.FillPolygon(br, TA(_plan.Mesh.Polygon));
-            using (var hatch = new HatchBrush(HatchStyle.SmallGrid, Color.FromArgb(110, 70, 130, 180), Color.Transparent)) g.FillPolygon(hatch, TA(_plan.Mesh.Polygon));
+            if (_plan.Mesh != null)
+            {
+                using (var br = new SolidBrush(Color.FromArgb(120, 135, 190, 230))) g.FillPolygon(br, TA(_plan.Mesh.Polygon));
+                using (var hatch = new HatchBrush(HatchStyle.SmallGrid, Color.FromArgb(110, 70, 130, 180), Color.Transparent)) g.FillPolygon(hatch, TA(_plan.Mesh.Polygon));
+            }
 
             // V khung: vòng giữa đa giác ngoài và đa giác dịch vào bằng bề rộng cánh nằm
             V2[] inner = Geo.Offset(_poly, _legA);

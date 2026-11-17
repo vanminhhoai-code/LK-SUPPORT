@@ -5,7 +5,7 @@ using Tekla.Structures.Geometry3d;
 
 namespace Tekla.Structures.Model
 {
-    public static class FakeLog { public static readonly List<string> Entries = new List<string>(); public static bool RejectInsert; public static readonly List<string> BeamPositions = new List<string>(); public static bool NonAsciiPrompt; public static int PickFailAt = -1; public static int Picked; public static void Add(string s) { Entries.Add(s); } }
+    public static class FakeLog { public static readonly List<string> Entries = new List<string>(); public static bool RejectInsert; public static bool RejectRebarMesh; public static int FailBeamAt = -1; public static int BeamCount; public static readonly List<double[]> BeamStarts = new List<double[]>(); public static readonly List<ModelObject> Selected = new List<ModelObject>(); public static readonly List<string> BeamPositions = new List<string>(); public static bool NonAsciiPrompt; public static int PickFailAt = -1; public static int Picked; public static void Add(string s) { Entries.Add(s); } }
 
     public class Profile { public string ProfileString { get; set; } }
     public class Material { public string MaterialString { get; set; } }
@@ -22,7 +22,20 @@ namespace Tekla.Structures.Model
 
     public abstract class ModelObject
     {
-        public bool Insert() { FakeLog.Add("Insert " + GetType().Name); var b = this as Beam; if (b != null) FakeLog.BeamPositions.Add(b.Position.Plane + "/" + b.Position.Rotation + "/" + b.Position.Depth); return !FakeLog.RejectInsert; }
+        public bool Insert()
+        {
+            FakeLog.Add("Insert " + GetType().Name);
+            var b = this as Beam;
+            if (b != null)
+            {
+                FakeLog.BeamCount++;
+                if (FakeLog.BeamCount == FakeLog.FailBeamAt) return false;
+                FakeLog.BeamPositions.Add(b.Position.Plane + "/" + b.Position.Rotation + "/" + b.Position.Depth);
+                FakeLog.BeamStarts.Add(new[] { b.StartPoint.X, b.StartPoint.Y, b.StartPoint.Z });
+            }
+            if (this is RebarMesh && FakeLog.RejectRebarMesh) throw new System.ApplicationException("RebarMesh is not valid for insert, required info missing");
+            return !FakeLog.RejectInsert;
+        }
         public bool Modify() { FakeLog.Add("Modify " + GetType().Name); return true; }
         public bool Delete() { FakeLog.Add("Delete " + GetType().Name); return true; }
     }
@@ -94,8 +107,19 @@ namespace Tekla.Structures.Model
         public bool CommitChanges() { FakeLog.Add("Commit"); return true; }
     }
 }
+namespace Tekla.Structures.Model
+{
+    public class ModelObjectEnumerator
+    {
+        private int _i = -1;
+        public bool MoveNext() { _i++; return _i < FakeLog.Selected.Count; }
+        public ModelObject Current { get { return FakeLog.Selected[_i]; } }
+        public int GetSize() { return FakeLog.Selected.Count; }
+    }
+}
 namespace Tekla.Structures.Model.UI
 {
+    public class ModelObjectSelector { public ModelObjectEnumerator GetSelectedObjects() { return new ModelObjectEnumerator(); } }
     public class Picker
     {
         public Tekla.Structures.Geometry3d.Point PickPoint(string prompt)

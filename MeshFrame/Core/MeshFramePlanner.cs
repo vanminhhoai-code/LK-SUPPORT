@@ -18,7 +18,8 @@ namespace MeshFrame.Core
             {
                 VPlane = PlanPlacement.Name(s.VPlane), VRotation = PlanPlacement.Name(s.VRotation), VDepth = PlanPlacement.Name(s.VDepth),
                 StripPlane = PlanPlacement.Name(s.StripPlane), StripRotation = PlanPlacement.Name(s.StripRotation), StripDepth = PlanPlacement.Name(s.StripDepth),
-                FlipMiterCut = s.FlipMiterCut, FlipBolt = s.FlipBolt, BoltStandard = s.BoltStandard
+                FlipMiterCut = s.FlipMiterCut, FlipBolt = s.FlipBolt, BoltStandard = s.BoltStandard,
+                VLateral = s.VLateral, StripLateral = s.StripLateral
             };
             WarnNonAscii(s, plan);
 
@@ -36,8 +37,9 @@ namespace MeshFrame.Core
             {
                 Polygon = meshPoly, ZBottom = -meshT, Thickness = meshT, WireDia = s.MeshWireDia, Pitch = s.MeshPitch,
                 WeightKgPerM2 = s.MeshWeightKgPerM2, Grade = s.MeshGrade, Name = s.MeshName, Prefix = s.MeshPrefix,
-                Class = s.MeshClass, StartNo = s.MeshStartNo
+                Class = s.MeshClass, StartNo = s.MeshStartNo, Kind = s.MeshKind
             };
+            if (s.MeshKind == MeshKind.None) plan.Mesh = null;
 
             // ---------- 4 thanh V khung (đường tham chiếu = mép ngoài cánh đứng, cánh nằm quay vào trong)
             for (int k = 0; k < 4; k++)

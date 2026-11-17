@@ -24,6 +24,9 @@ namespace MeshFrame.UI
         private readonly Label _info = new Label { Dock = DockStyle.Bottom, Height = 96, Padding = new Padding(6) };
         private bool _loading;
 
+        /// <summary>Hàm đọc đối tượng đang chọn trong Tekla (app gắn vào); trả về thông báo hiển thị cho người dùng.</summary>
+        public Func<string> SelectedObjectProbe { get; set; }
+
         /// <summary>Thông số hiện tại (đọc từ ô nhập / gán để nạp vào ô nhập).</summary>
         public MeshFrameSettings Settings
         {
@@ -125,7 +128,8 @@ namespace MeshFrame.UI
         private TabPage TabMesh()
         {
             var t = NewPage("Lưới");
-            Note(t, "Lưới là Reinforcement Mesh theo đa giác 4 điểm. Không bắt buộc đúng 100% lưới SUS304, có thể đặt tên gợi nhớ.");
+            Note(t, "Lưới nằm phía ngoài cánh nằm V, nẹp ép ngoài lưới. Tấm mỏng luôn tạo được (khối lượng nhập tay bên dưới); RebarMesh cần Tekla chấp nhận đủ thuộc tính.");
+            Row(t, "MeshKind", "Kiểu lưới", "Tấm mỏng (plate)", "RebarMesh", "Không tạo lưới");
             Row(t, "MeshGap", "Lưới lùi cách mép ngoài khung (mm)");
             Row(t, "MeshWireDia", "Đường kính sợi (mm)");
             Row(t, "MeshPitch", "Bước sợi = ô + sợi (mm)");
@@ -161,7 +165,7 @@ namespace MeshFrame.UI
         private TabPage TabTekla()
         {
             var t = NewPage("Tekla");
-            Note(t, "Chỉnh khi kết quả trong Tekla lệch. Dùng chữ KHÔNG DẤU cho các ô gửi sang Tekla (tên, prefix, profile...).");
+            Note(t, "Chỉnh khi kết quả trong Tekla lệch. Mặc định đặt theo tim (On plane / At depth = Middle) để V và nẹp trùng tim. Dùng chữ KHÔNG DẤU cho các ô gửi sang Tekla.");
             Row(t, "VProfile", "Profile V khung + gia cường (trống = tự tạo)");
             Row(t, "StripProfile", "Profile nẹp (trống = tự tạo FL w*t)");
             Row(t, "BoltStandard", "Bolt standard (vít)");
@@ -173,8 +177,22 @@ namespace MeshFrame.UI
             Row(t, "StripPlane", "  On plane", "Left", "Middle", "Right");
             Row(t, "StripRotation", "  Rotation", "Front", "Top", "Back", "Below");
             Row(t, "StripDepth", "  At depth", "Front", "Middle", "Behind");
+            Row(t, "VLateral", "Lệch ngang V (mm, + vào trong khung)");
+            Row(t, "StripLateral", "Lệch ngang nẹp (mm, + vào trong khung)");
             Row(t, "FlipMiterCut", "Đảo phía cắt vát (nếu mặt cắt vát ra ngược)");
             Row(t, "FlipBolt", "Đảo chiều vít (nếu vít ra ngược)");
+            var probe = new Button { Text = "Đọc lưới mẫu đang chọn trong Tekla", AutoSize = true, Margin = new Padding(3, 10, 3, 3) };
+            probe.Click += delegate
+            {
+                if (SelectedObjectProbe == null) { MessageBox.Show("Chỉ dùng khi chạy cùng Tekla.", "MeshFrame"); return; }
+                string msg;
+                try { msg = SelectedObjectProbe(); } catch (Exception ex) { msg = "Lỗi: " + ex.Message; }
+                MessageBox.Show(msg, "MeshFrame");
+            };
+            int pr = t.RowCount++;
+            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            t.Controls.Add(probe, 0, pr);
+            t.SetColumnSpan(probe, 2);
             return (TabPage)t.Parent;
         }
 
@@ -265,7 +283,7 @@ namespace MeshFrame.UI
                     var parts = new List<string>(); foreach (double c in plan.Cells) parts.Add(c.ToString("0.#", CultureInfo.InvariantCulture));
                     sb.AppendLine("Bề rộng các ô: " + string.Join(" · ", parts.ToArray()));
                 }
-                sb.AppendLine(string.Format("Lưới: {0} lớp sợi {1:0.##} mm, nằm dưới cánh V (phía ngoài), nẹp ngoài lưới", "2", plan.Mesh.WireDia));
+                sb.AppendLine(plan.Mesh == null ? "Không tạo lưới" : string.Format("Lưới ({0}): 2 lớp sợi {1:0.##} mm, dưới cánh V (phía ngoài), nẹp ngoài lưới", plan.Mesh.Kind, plan.Mesh.WireDia));
                 foreach (string w in plan.Warnings) sb.AppendLine("⚠ " + w);
             }
             _info.Text = sb.ToString();

@@ -40,6 +40,7 @@ namespace MeshFrame.App
                 {
                     dlg.Text = title;
                     dlg.Settings = settings;
+                    dlg.SelectedObjectProbe = delegate { return TeklaProbe.DumpSelected(api); };
                     if (dlg.ShowDialog() != DialogResult.OK) break;
                     settings = dlg.Settings;
                 }
