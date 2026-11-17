@@ -14,6 +14,15 @@ namespace MeshFrame.Core
             else if (!IsConvexCcw(poly)) plan.Errors.Add("4 điểm phải tạo tứ giác lồi và pick liên tiếp quanh khung (P1-P2-P3-P4).");
             if (plan.Errors.Count > 0) return plan;
 
+            plan.Placement = new PlanPlacement
+            {
+                VPlane = PlanPlacement.Name(s.VPlane), VRotation = PlanPlacement.Name(s.VRotation), VDepth = PlanPlacement.Name(s.VDepth),
+                SPlane = PlanPlacement.Name(s.SPlane), SRotation = PlanPlacement.Name(s.SRotation), SDepth = PlanPlacement.Name(s.SDepth),
+                StripPlane = PlanPlacement.Name(s.StripPlane), StripRotation = PlanPlacement.Name(s.StripRotation), StripDepth = PlanPlacement.Name(s.StripDepth),
+                FlipMiterCut = s.FlipMiterCut, BoltStandard = s.BoltStandard
+            };
+            WarnNonAscii(s, plan);
+
             double tV = s.VThk;
             double meshT = 2 * s.MeshWireDia;           // 2 lớp sợi đan
             double stripZ = tV + meshT;
@@ -37,7 +46,7 @@ namespace MeshFrame.Core
                 {
                     Role = BarRole.Frame, Start = a, End = b, CutStart = ca, CutEnd = cb,
                     LegA = s.VLegA, LegB = s.VLegB, Thk = tV, ZTop = tV, VerticalUp = true, Centered = false,
-                    Material = s.VMaterial, Name = s.VName, Class = s.VClass, Prefix = s.VPrefix, StartNo = s.VStartNo
+                    Material = s.VMaterial, Name = s.VName, Class = s.VClass, Prefix = s.VPrefix, StartNo = s.VStartNo, ProfileOverride = s.VProfile
                 });
             }
 
@@ -92,7 +101,7 @@ namespace MeshFrame.Core
                 {
                     Role = BarRole.Stiffener, Start = sa, End = sb,
                     LegA = s.SLegA, LegB = s.SLegB, Thk = s.SThk, ZTop = tV, VerticalUp = false, Centered = true,
-                    Material = s.SMaterial, Name = s.SName, Class = s.SClass, Prefix = s.SPrefix, StartNo = s.SStartNo
+                    Material = s.SMaterial, Name = s.SName, Class = s.SClass, Prefix = s.SPrefix, StartNo = s.SStartNo, ProfileOverride = s.SProfile
                 });
 
                 if (s.UseStrip)
@@ -152,6 +161,20 @@ namespace MeshFrame.Core
             return OnSegment(pa, q[e1], q[(e1 + 1) % 4]) && OnSegment(pb, q[e2], q[(e2 + 1) % 4]);
         }
 
+        /// <summary>Chuỗi gửi sang Tekla (tên, class, prefix, profile...) có ký tự ngoài ASCII thì Tekla có thể hiển thị lỗi font.</summary>
+        private static void WarnNonAscii(MeshFrameSettings s, MeshFramePlan plan)
+        {
+            var bad = new List<string>();
+            foreach (System.Reflection.FieldInfo f in typeof(MeshFrameSettings).GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+            {
+                if (f.FieldType != typeof(string) || f.Name == "StiffCells") continue;
+                string v = (string)f.GetValue(s);
+                if (v == null) continue;
+                foreach (char ch in v) if (ch > 127) { bad.Add(f.Name); break; }
+            }
+            if (bad.Count > 0) plan.Warnings.Add("Có chữ có dấu/ký tự ngoài ASCII trong: " + string.Join(", ", bad.ToArray()) + ". Tekla có thể hiển thị lỗi font, nên dùng không dấu.");
+        }
+
         private static bool OnSegment(V2 p, V2 a, V2 b)
         {
             V2 ab = b - a;
@@ -192,7 +215,7 @@ namespace MeshFrame.Core
             {
                 Start = a, End = b, CutStart = ca, CutEnd = cb, Width = s.StripWidth, Thk = s.StripThk, ZBottom = z,
                 Material = s.StripMaterial, Name = s.StripName, Class = s.StripClass, Prefix = s.StripPrefix,
-                StartNo = s.StripStartNo, OnStiffener = onStiff
+                StartNo = s.StripStartNo, OnStiffener = onStiff, ProfileOverride = s.StripProfile
             };
         }
 

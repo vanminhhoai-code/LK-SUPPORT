@@ -92,6 +92,19 @@ static class PlanTests
         var bad = new[] { new V3(0, 0, 0), new V3(4000, 0, 0), new V3(4000, 1200, 500), new V3(0, 1200, 0) };
         Check("khong dong phang bao loi", !MeshFrameBuilder.Build(new MeshFrameSettings(), bad, null).Success);
 
+        // --- profile ghi de, huong dat, canh bao chu co dau
+        s = new MeshFrameSettings { VProfile = "L50x50x3", StripProfile = "PL3*30", SProfile = "" };
+        p = MeshFramePlanner.Plan(s, Rect(4000, 1200, 0));
+        Check("profile ghi de dung cho V khung + nep", p.Bars.First(b => b.Role == BarRole.Frame).Profile == "L50x50x3" && p.Strips.All(x => x.Profile == "PL3*30"));
+        Check("profile gia cuong de trong = tu tao", p.Bars.First(b => b.Role == BarRole.Stiffener).Profile == "L25*25*2");
+        Check("huong dat mac dinh dang ten enum Tekla", p.Placement.VPlane == "LEFT" && p.Placement.VRotation == "FRONT" && p.Placement.StripDepth == "BEHIND" && p.Placement.BoltStandard == "8.8XOX");
+        s = new MeshFrameSettings { VPlane = PlaneKind.Right, VRotation = RotationKind.Below, VDepth = DepthKind.Middle, FlipMiterCut = true };
+        p = MeshFramePlanner.Plan(s, Rect(4000, 1200, 0));
+        Check("huong dat doi theo thong so", p.Placement.VPlane == "RIGHT" && p.Placement.VRotation == "BELOW" && p.Placement.VDepth == "MIDDLE" && p.Placement.FlipMiterCut);
+        p = MeshFramePlanner.Plan(new MeshFrameSettings { VName = "KHUNG LƯỚI", MeshName = "Lưới" }, Rect(4000, 1200, 0));
+        Check("chu co dau -> canh bao", p.Warnings.Any(w => w.Contains("VName") && w.Contains("MeshName")));
+        Check("mac dinh khong canh bao ASCII", !MeshFramePlanner.Plan(new MeshFrameSettings(), Rect(4000, 1200, 0)).Warnings.Any(w => w.Contains("ASCII")));
+
         // --- luu / nap thong so
         var cfg = new MeshFrameSettings { VLegA = 40.5, StiffMode = StiffMode.Custom, StiffCells = "800 2*1500", UseStrip = false, Fasten = FastenKind.SpotWeld, MeshName = "TEST" };
         string tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "meshframe_test_" + Guid.NewGuid().ToString("N") + ".ini");
@@ -100,6 +113,9 @@ static class PlanTests
         System.IO.File.Delete(tmp);
         Check("luu/nap thong so", Near(back.VLegA, 40.5, 1e-12) && back.StiffMode == StiffMode.Custom && back.StiffCells == "800 2*1500"
               && !back.UseStrip && back.Fasten == FastenKind.SpotWeld && back.MeshName == "TEST");
+        var cfg2 = new MeshFrameSettings { VPlane = PlaneKind.Right, SDepth = DepthKind.Behind, FlipMiterCut = true, BoltStandard = "7990", VProfile = "L50x50x3" };
+        SettingsStore.Save(cfg2, tmp); var back2 = SettingsStore.Load(tmp); System.IO.File.Delete(tmp);
+        Check("luu/nap huong dat + profile + bolt", back2.VPlane == PlaneKind.Right && back2.SDepth == DepthKind.Behind && back2.FlipMiterCut && back2.BoltStandard == "7990" && back2.VProfile == "L50x50x3");
         Check("nap file khong ton tai = mac dinh", Near(SettingsStore.Load("/khong/co/file.ini").VLegA, 50, 1e-12));
 
         Console.WriteLine("pass " + pass + " fail " + fail);

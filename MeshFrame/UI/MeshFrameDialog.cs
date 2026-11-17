@@ -51,6 +51,7 @@ namespace MeshFrame.UI
             tabs.TabPages.Add(TabStiff());
             tabs.TabPages.Add(TabMesh());
             tabs.TabPages.Add(TabStrip());
+            tabs.TabPages.Add(TabTekla());
 
             var right = new Panel { Dock = DockStyle.Fill };
             var top = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(6, 8, 0, 0) };
@@ -157,6 +158,30 @@ namespace MeshFrame.UI
             Row(t, "FastenDia", "Đường kính vít (mm)");
             Row(t, "FastenPitch", "Bước @ tối đa (mm)");
             Row(t, "FastenEdge", "Cách đầu thanh (mm)");
+            return (TabPage)t.Parent;
+        }
+
+        private TabPage TabTekla()
+        {
+            var t = NewPage("Tekla");
+            Note(t, "Chỉnh khi kết quả trong Tekla lệch. Dùng chữ KHÔNG DẤU cho các ô gửi sang Tekla (tên, prefix, profile...).");
+            Row(t, "VProfile", "Profile V khung (trống = tự tạo L a*b*t)");
+            Row(t, "SProfile", "Profile V gia cường (trống = tự tạo)");
+            Row(t, "StripProfile", "Profile nẹp (trống = tự tạo FL w*t)");
+            Row(t, "BoltStandard", "Bolt standard (vít)");
+            Note(t, "Hướng đặt thép góc V khung:");
+            Row(t, "VPlane", "  On plane", "Left", "Middle", "Right");
+            Row(t, "VRotation", "  Rotation", "Front", "Top", "Back", "Below");
+            Row(t, "VDepth", "  At depth", "Front", "Middle", "Behind");
+            Note(t, "Hướng đặt V gia cường:");
+            Row(t, "SPlane", "  On plane", "Left", "Middle", "Right");
+            Row(t, "SRotation", "  Rotation", "Front", "Top", "Back", "Below");
+            Row(t, "SDepth", "  At depth", "Front", "Middle", "Behind");
+            Note(t, "Hướng đặt nẹp:");
+            Row(t, "StripPlane", "  On plane", "Left", "Middle", "Right");
+            Row(t, "StripRotation", "  Rotation", "Front", "Top", "Back", "Below");
+            Row(t, "StripDepth", "  At depth", "Front", "Middle", "Behind");
+            Row(t, "FlipMiterCut", "Đảo phía cắt vát (nếu mặt cắt vát ra ngược)");
             return (TabPage)t.Parent;
         }
 

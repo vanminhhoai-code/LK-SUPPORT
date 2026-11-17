@@ -58,6 +58,17 @@ static class WriterTests
         Check("Insert false -> loi nhac kiem tra profile", threw);
         Check("loi van tra mat phang + commit", Count("SetPlane") == 2 && Count("Commit") == 1);
 
+        // --- mọi giá trị enum hướng đặt người dùng chọn được phải là enum Tekla có thật (ghi vào members để đối chiếu DLL thật)
+        foreach (PlaneKind k in Enum.GetValues(typeof(PlaneKind))) api.Enum("Position+PlaneEnum", PlanPlacement.Name(k));
+        foreach (RotationKind k in Enum.GetValues(typeof(RotationKind))) api.Enum("Position+RotationEnum", PlanPlacement.Name(k));
+        foreach (DepthKind k in Enum.GetValues(typeof(DepthKind))) api.Enum("Position+DepthEnum", PlanPlacement.Name(k));
+
+        // --- hướng đặt từ plan thật sự được ghi vào Tekla
+        FakeLog.Entries.Clear(); FakeLog.BeamPositions.Clear();
+        var set = new MeshFrameSettings { VPlane = PlaneKind.Right, VRotation = RotationKind.Below, VDepth = DepthKind.Middle, StiffMode = StiffMode.None, UseStrip = false };
+        MeshFrameBuilder.Build(set, corners, new TeklaModelWriter(api, null));
+        Check("huong dat tu thong so duoc ghi vao beam", FakeLog.BeamPositions.Count == 4 && FakeLog.BeamPositions.All(x => x == "RIGHT/BELOW/MIDDLE"));
+
         // --- pick 4 điểm (hồi quy: Point.X/Y/Z là FIELD, trước đây lỗi sau lần pick đầu)
         FakeLog.Picked = 0; FakeLog.PickFailAt = -1;
         PickResult pr = TeklaPicker.PickCorners(api, new Tekla.Structures.Model.Model());

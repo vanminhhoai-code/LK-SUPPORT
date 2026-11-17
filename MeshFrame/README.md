@@ -14,7 +14,8 @@ Một `MeshFrame.exe` cho **Tekla 21.1 / 2020 / 2025**: API Tekla nạp lúc ch�
 1. `build-app.bat` -> `out\MeshFrame.exe` + `Start-Tekla21.1.bat` / `Start-Tekla2020.bat` / `Start-Tekla2025.bat`.
 2. Mở Tekla + model, chạy file `Start-Tekla<bản>.bat` tương ứng (hoặc `MeshFrame.exe --tekla-version=2025`).
    Không chỉ bản thì thử lần lượt 2025, 2020, 21.1. Tự tìm API ở `nt\bin\plugins` (21.1, 2020) hoặc `bin` (2025); chỉ tay bằng `--tekla-bin=` hoặc `MeshFrame.ini`.
-3. Nhập thông số -> OK -> pick 4 điểm trong Tekla (ngược chiều kim đồng hồ nhìn từ trên). Thông số nhớ ở `%APPDATA%\MeshFrame\settings.ini`.
+3. Tab **Tekla**: ghi đè tên profile, bolt standard, hướng đặt thép góc/nẹp (On plane / Rotation / At depth), đảo phía cắt vát - chỉnh khi kết quả trong Tekla lệch; dùng chữ không dấu cho ô gửi sang Tekla.
+4. Nhập thông số -> OK -> pick 4 điểm trong Tekla (ngược chiều kim đồng hồ nhìn từ trên). Thông số nhớ ở `%APPDATA%\MeshFrame\settings.ini`.
 
 ## Kiểm tra (không cần Tekla): `ci/build.sh`
 Test Core (33) · build app · test bộ ghi trên SDK giả · **đối chiếu từng thành viên Tekla mà bộ ghi dùng (kiểu, hàm tạo, thuộc tính, hàm, kiểu đối số, enum) với DLL thật**: NuGet 2021 và 2025 tự chạy.

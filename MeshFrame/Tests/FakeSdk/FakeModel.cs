@@ -5,7 +5,7 @@ using Tekla.Structures.Geometry3d;
 
 namespace Tekla.Structures.Model
 {
-    public static class FakeLog { public static readonly List<string> Entries = new List<string>(); public static bool RejectInsert; public static bool NonAsciiPrompt; public static int PickFailAt = -1; public static int Picked; public static void Add(string s) { Entries.Add(s); } }
+    public static class FakeLog { public static readonly List<string> Entries = new List<string>(); public static bool RejectInsert; public static readonly List<string> BeamPositions = new List<string>(); public static bool NonAsciiPrompt; public static int PickFailAt = -1; public static int Picked; public static void Add(string s) { Entries.Add(s); } }
 
     public class Profile { public string ProfileString { get; set; } }
     public class Material { public string MaterialString { get; set; } }
@@ -22,7 +22,7 @@ namespace Tekla.Structures.Model
 
     public abstract class ModelObject
     {
-        public bool Insert() { FakeLog.Add("Insert " + GetType().Name); return !FakeLog.RejectInsert; }
+        public bool Insert() { FakeLog.Add("Insert " + GetType().Name); var b = this as Beam; if (b != null) FakeLog.BeamPositions.Add(b.Position.Plane + "/" + b.Position.Rotation + "/" + b.Position.Depth); return !FakeLog.RejectInsert; }
         public bool Modify() { FakeLog.Add("Modify " + GetType().Name); return true; }
     }
 

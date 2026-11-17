@@ -9,6 +9,10 @@ namespace MeshFrame.Core
     public enum FastenKind { None = 0, Screw = 1, SpotWeld = 2 }
     public enum StiffMode { None = 0, Equal = 1, Custom = 2 }
     public enum StiffDir { AcrossP1P2 = 0, AcrossP1P4 = 1 }
+    // Hướng đặt thép góc / nẹp trong Tekla (Position.Plane / Rotation / Depth). Thứ tự khớp tên enum Tekla.
+    public enum PlaneKind { Left = 0, Middle = 1, Right = 2 }
+    public enum RotationKind { Front = 0, Top = 1, Back = 2, Below = 3 }
+    public enum DepthKind { Front = 0, Middle = 1, Behind = 2 }
 
     public class MeshFrameSettings
     {
@@ -40,6 +44,14 @@ namespace MeshFrame.Core
         public double StripWidth = 30, StripThk = 3;
         public string StripMaterial = "SUS304", StripName = "NEP LUOI", StripClass = "5", StripPrefix = "N";
         public int StripStartNo = 1;
+
+        // ---- Tekla: profile (để trống = tự tạo), bolt standard, hướng đặt. Chỉnh khi kết quả trong Tekla lệch.
+        public string VProfile = "", SProfile = "", StripProfile = "";
+        public string BoltStandard = "8.8XOX";
+        public PlaneKind VPlane = PlaneKind.Left, SPlane = PlaneKind.Middle, StripPlane = PlaneKind.Middle;
+        public RotationKind VRotation = RotationKind.Front, SRotation = RotationKind.Front, StripRotation = RotationKind.Front;
+        public DepthKind VDepth = DepthKind.Front, SDepth = DepthKind.Front, StripDepth = DepthKind.Behind;
+        public bool FlipMiterCut = false;
 
         // ---- Liên kết (chỉ có nghĩa khi UseStrip)
         public FastenKind Fasten = FastenKind.Screw;

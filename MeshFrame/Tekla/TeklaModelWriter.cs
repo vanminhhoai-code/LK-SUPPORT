@@ -7,22 +7,11 @@ using MeshFrame.Core;
 
 namespace MeshFrame.Tekla
 {
-    /// <summary>Cách đặt thép góc/nẹp so với đường tham chiếu (tên enum Tekla dạng chữ). Cần chỉnh 1 lần khi chạy thử trong Tekla.</summary>
-    public class TeklaPlacement
-    {
-        public string VPlane = "LEFT", VRotation = "FRONT", VDepth = "FRONT";
-        public string SPlane = "MIDDLE", SRotation = "FRONT", SDepth = "FRONT";
-        public string StripPlane = "MIDDLE", StripRotation = "FRONT", StripDepth = "BEHIND";
-        /// <summary>Đảo phía bị cắt của Fitting nếu mặt cắt vát ra ngược.</summary>
-        public bool FlipMiterCut = false;
-        public string BoltStandard = "8.8XOX";
-    }
-
     public sealed class TeklaModelWriter : IModelWriter
     {
         private readonly TeklaApi A;
         private readonly object _model;
-        public readonly TeklaPlacement Placement = new TeklaPlacement();
+        private PlanPlacement P;                     // cách đặt lấy từ plan (chỉnh trong tab Tekla)
         public readonly List<string> Messages = new List<string>();
 
         /// <param name="model">Đối tượng Tekla.Structures.Model.Model đã có (Cover Tool: model của gateway); null = tạo mới.</param>
@@ -34,6 +23,7 @@ namespace MeshFrame.Tekla
 
         public void Write(MeshFramePlan plan, Frame f)
         {
+            P = plan.Placement;
             object wph = A.Call(_model, "GetWorkPlaneHandler");
             object old = A.Call(wph, "GetCurrentTransformationPlane");
             try
@@ -75,7 +65,7 @@ namespace MeshFrame.Tekla
             bool stiff = bar.Role == BarRole.Stiffener;
             object beam = NewBeam(bar.Start, bar.End, bar.ZTop);
             Describe(beam, bar.Profile, bar.Material, bar.Name, bar.Class, bar.Prefix, bar.StartNo,
-                     stiff ? Placement.SPlane : Placement.VPlane, stiff ? Placement.SRotation : Placement.VRotation, stiff ? Placement.SDepth : Placement.VDepth);
+                     stiff ? P.SPlane : P.VPlane, stiff ? P.SRotation : P.VRotation, stiff ? P.SDepth : P.VDepth);
             A.Require(beam, "Insert", "thanh " + bar.Profile + " (kiểm tra profile trong catalog)");
             AddMiter(beam, bar.Start, bar.CutStart, bar.ZTop);
             AddMiter(beam, bar.End, bar.CutEnd, bar.ZTop);
@@ -86,7 +76,7 @@ namespace MeshFrame.Tekla
         {
             object beam = NewBeam(st.Start, st.End, st.ZBottom);
             Describe(beam, st.Profile, st.Material, st.Name, st.Class, st.Prefix, st.StartNo,
-                     Placement.StripPlane, Placement.StripRotation, Placement.StripDepth);
+                     P.StripPlane, P.StripRotation, P.StripDepth);
             A.Require(beam, "Insert", "nẹp " + st.Profile + " (kiểm tra profile trong catalog)");
             AddMiter(beam, st.Start, st.CutStart, st.ZBottom);
             AddMiter(beam, st.End, st.CutEnd, st.ZBottom);
@@ -119,7 +109,7 @@ namespace MeshFrame.Tekla
         {
             if (!cutDir.HasValue) return;
             V2 d = cutDir.Value;
-            if (Placement.FlipMiterCut) d = d * -1;
+            if (P.FlipMiterCut) d = d * -1;
             object fit = A.New(A.ModelType("Fitting"));
             A.Set(fit, "Father", beam);
             object plane = A.New(A.ModelType("Plane"));
@@ -178,14 +168,14 @@ namespace MeshFrame.Tekla
                 A.Set(bolt, "FirstPosition", A.Point(first.Pos.X, first.Pos.Y, first.ZTop));
                 A.Set(bolt, "SecondPosition", A.Point(first.Pos.X + dir.X, first.Pos.Y + dir.Y, first.ZTop));
                 A.Set(bolt, "BoltSize", first.Dia);
-                A.Set(bolt, "BoltStandard", Placement.BoltStandard);
+                A.Set(bolt, "BoltStandard", P.BoltStandard);
                 A.Set(bolt, "Tolerance", 0.0);
                 A.Set(bolt, "BoltType", A.Enum("BoltGroup+BoltTypeEnum", "BOLT_TYPE_WORKSHOP"));
                 A.Set(bolt, "Length", first.Length);
                 for (int i = 1; i < pts.Count; i++) A.Call(bolt, "AddBoltDistX", step);
                 A.Call(bolt, "AddBoltDistY", 0.0);
                 object ok = A.Call(bolt, "Insert");
-                if (ok is bool && !(bool)ok) Messages.Add("Không tạo được vít trên nẹp " + (si + 1) + " (kiểm tra bolt standard '" + Placement.BoltStandard + "').");
+                if (ok is bool && !(bool)ok) Messages.Add("Không tạo được vít trên nẹp " + (si + 1) + " (kiểm tra bolt standard '" + P.BoltStandard + "').");
             }
         }
 

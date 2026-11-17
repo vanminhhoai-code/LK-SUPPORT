@@ -17,7 +17,8 @@ namespace MeshFrame.Core
         public bool Centered;           // cánh nằm đặt giữa đường tham chiếu
         public string Material, Name, Class, Prefix;
         public int StartNo;
-        public string Profile { get { return string.Format(System.Globalization.CultureInfo.InvariantCulture, "L{0:0.##}*{1:0.##}*{2:0.##}", LegA, LegB, Thk); } }
+        public string ProfileOverride;  // rỗng = tự tạo L a*b*t
+        public string Profile { get { return !string.IsNullOrEmpty(ProfileOverride) ? ProfileOverride : string.Format(System.Globalization.CultureInfo.InvariantCulture, "L{0:0.##}*{1:0.##}*{2:0.##}", LegA, LegB, Thk); } }
     }
 
     public class PlanStrip
@@ -28,7 +29,8 @@ namespace MeshFrame.Core
         public string Material, Name, Class, Prefix;
         public int StartNo;
         public bool OnStiffener;
-        public string Profile { get { return string.Format(System.Globalization.CultureInfo.InvariantCulture, "FL{0:0.##}*{1:0.##}", Width, Thk); } }
+        public string ProfileOverride;  // rỗng = tự tạo FL w*t
+        public string Profile { get { return !string.IsNullOrEmpty(ProfileOverride) ? ProfileOverride : string.Format(System.Globalization.CultureInfo.InvariantCulture, "FL{0:0.##}*{1:0.##}", Width, Thk); } }
     }
 
     public class PlanMesh
@@ -47,8 +49,20 @@ namespace MeshFrame.Core
         public int StripIndex;          // vít này thuộc nẹp nào (chỉ số trong plan.Strips)
     }
 
+    /// <summary>Cách đặt trong Tekla, dạng tên enum Tekla (LEFT, FRONT, BEHIND, ...).</summary>
+    public class PlanPlacement
+    {
+        public string VPlane, VRotation, VDepth, SPlane, SRotation, SDepth, StripPlane, StripRotation, StripDepth;
+        public bool FlipMiterCut;
+        public string BoltStandard;
+        public static string Name(PlaneKind k) { return k.ToString().ToUpperInvariant(); }
+        public static string Name(RotationKind k) { return k.ToString().ToUpperInvariant(); }
+        public static string Name(DepthKind k) { return k.ToString().ToUpperInvariant(); }
+    }
+
     public class MeshFramePlan
     {
+        public PlanPlacement Placement = new PlanPlacement();
         public List<PlanBar> Bars = new List<PlanBar>();
         public List<PlanStrip> Strips = new List<PlanStrip>();
         public PlanMesh Mesh;
