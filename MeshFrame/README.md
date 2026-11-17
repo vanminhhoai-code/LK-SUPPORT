@@ -15,13 +15,16 @@ Một `MeshFrame.exe` cho **Tekla 21.1 / 2020 / 2025**: API Tekla nạp lúc ch�
 ## Chạy (PC có Tekla)
 1. `build-app.bat` -> `out\MeshFrame.exe` + `Start-Tekla21.1.bat` / `Start-Tekla2020.bat` / `Start-Tekla2025.bat`.
 2. Mở Tekla + model, chạy file `Start-Tekla<bản>.bat` tương ứng (hoặc `MeshFrame.exe --tekla-version=2025`).
-   Không chỉ bản thì thử lần lượt 2025, 2020, 21.1. Tự tìm API ở `nt\bin\plugins` (21.1, 2020) hoặc `bin` (2025); chỉ tay bằng `--tekla-bin=` hoặc `MeshFrame.ini`.
-3. Tab **Lưới**: kiểu lưới *Tấm mỏng* (mặc định, luôn tạo được) / *RebarMesh* / *Không tạo*. Lỗi lưới hoặc vít chỉ hiện cảnh báo, vẫn gộp assembly; lỗi nặng (thanh V/nẹp) tự xóa phần đã tạo.
-3. Tab **Tekla**: nút *Đọc lưới mẫu đang chọn* ghi mọi thuộc tính của đối tượng chọn trong Tekla ra `%APPDATA%\MeshFrame\selected-object.txt` (để chép đúng thuộc tính RebarMesh); ô *Lệch ngang* cho V và nẹp; ghi đè tên profile, bolt standard, hướng đặt thép góc/nẹp (On plane / Rotation / At depth), đảo phía cắt vát - chỉnh khi kết quả trong Tekla lệch; dùng chữ không dấu cho ô gửi sang Tekla.
-4. Nhập thông số -> OK -> pick 4 điểm trong Tekla (ngược chiều kim đồng hồ nhìn từ trên). Thông số nhớ ở `%APPDATA%\MeshFrame\settings.ini`.
+   Tự tìm API ở `nt\bin\plugins` (21.1, 2020) hoặc `bin` (2025); chỉ tay bằng `--tekla-bin=` hoặc `MeshFrame.ini`.
+3. **Pick đa giác** trong Tekla (từ 3 điểm, lồi hoặc lõm, không tự cắt): mỗi điểm được vẽ thật kèm tên P1..Pn và chiều dài đoạn nối; thanh trạng thái hiện đoạn trước và chu vi. Kết thúc bằng **chuột giữa**; app tự nối điểm cuối về điểm đầu. Pick ngược chiều kim đồng hồ nhìn từ trên thì phía "trên" của khung là phía nhìn.
+4. **Hình thật hiện trong app** (chưa tạo gì trong Tekla): chỉnh thông số, sửa tọa độ điểm, xem cảnh báo (vd khung quá nhỏ không cần/không tạo được gia cường). Nút **Pick lại điểm** để pick lại.
+5. Bấm **Tạo khung trong Tekla**. Hộp thoại giữ nguyên để chỉnh tiếp.
+6. **Sửa khung đã chọn**: chọn khung (một part bất kỳ của nó) trong Tekla, bấm nút -> thông số và điểm cũ hiện lại; sửa rồi bấm "Cập nhật khung" -> tạo khung mới rồi xóa khung cũ (lỗi thì giữ khung cũ). Mã khung gắn vào UDA `MESHFRAME_ID` của part chính; thông số + điểm lưu ở `<thư mục model>\MeshFrame\<mã>.mfr` (model phải đã lưu).
+7. Tab **Lưới**: *RebarMesh* (mặc định, tự thay bằng tấm mỏng nếu Tekla từ chối) / *Tấm mỏng* / *Không tạo*. Mác và cỡ sợi RebarMesh được kiểm tra với catalog rebar của Tekla (có ô chọn từ catalog). Tab **Tekla**: profile ghi đè, hướng đặt thép góc/nẹp, lệch ngang, đảo cắt vát, nút *Đọc lưới mẫu* (ghi mọi thuộc tính đối tượng đang chọn ra `%APPDATA%\MeshFrame\selected-object.txt`).
+Thông số nhớ ở `%APPDATA%\MeshFrame\settings.ini`. Vít: chưa có (sẽ làm thành item sau).
 
 ## Kiểm tra (không cần Tekla): `ci/build.sh`
-Test Core (33) · build app · test bộ ghi trên SDK giả · **đối chiếu từng thành viên Tekla mà bộ ghi dùng (kiểu, hàm tạo, thuộc tính, hàm, kiểu đối số, enum) với DLL thật**: NuGet 2021 và 2025 tự chạy.
+Test Core (đa giác lồi/lõm, gia cường, nẹp, cắt khuyết...) · build app · test bộ ghi/picker/dịch vụ khung trên SDK giả · **đối chiếu từng thành viên Tekla mà bộ ghi dùng (kiểu, hàm tạo, thuộc tính, hàm, kiểu đối số, enum) với DLL thật**: NuGet 2021 và 2025 tự chạy.
 Thêm bản khác: `REAL_SDK_DIRS="<thư mục có Tekla.Structures.dll + Tekla.Structures.Model.dll>" ci/build.sh` (dùng cho 21.1 và 2020 khi có DLL).
 
 Trạng thái kiểm chứng: API tạo model đã đối chiếu **2021 và 2025**; **21.1 và 2020 chưa** (chưa có DLL). Chưa chạy trong Tekla thật.

@@ -40,14 +40,25 @@ namespace MeshFrame.Core
         public V3 ToWorld(V2 p, double z) { return Origin + U * p.X + V * p.Y + N * z; }
         public V2 To2D(V3 w) { V3 d = w - Origin; return new V2(d.Dot(U), d.Dot(V)); }
 
-        /// <summary>Tạo hệ trục từ 4 điểm pick. N theo quy tắc bàn tay phải: pick ngược chiều kim đồng hồ nhìn từ trên thì N hướng lên.</summary>
+        /// <summary>Tạo hệ trục từ N điểm pick (N ≥ 3): pháp tuyến N theo Newell (quy tắc bàn tay phải: pick ngược chiều kim đồng hồ
+        /// nhìn từ trên thì N hướng lên), nên đa giác luôn ngược chiều kim đồng hồ trong (U, V). Các điểm phải cùng mặt phẳng (lệch ≤ 1 mm).</summary>
         public static bool TryCreate(V3[] c, out Frame f, out string error)
         {
             f = null; error = null;
+            if (c == null || c.Length < 3) { error = "Cần ít nhất 3 điểm."; return false; }
+            V3 n = new V3(0, 0, 0);
+            for (int i = 0; i < c.Length; i++)
+            {
+                V3 a = c[i], b = c[(i + 1) % c.Length];
+                n = n + new V3((a.Y - b.Y) * (a.Z + b.Z), (a.Z - b.Z) * (a.X + b.X), (a.X - b.X) * (a.Y + b.Y));
+            }
+            if (n.Length < 1e-6) { error = "Các điểm thẳng hàng hoặc quá gần nhau."; return false; }
+            n = n.Unit();
             V3 u = (c[1] - c[0]).Unit();
-            V3 n = u.Cross(c[3] - c[0]).Unit();
-            if (u.Length < 0.5 || n.Length < 0.5) { error = "P1, P2, P4 thẳng hàng hoặc trùng nhau."; return false; }
-            if (System.Math.Abs((c[2] - c[0]).Dot(n)) > 1.0) { error = "4 điểm pick không cùng một mặt phẳng (lệch > 1 mm)."; return false; }
+            if (u.Length < 0.5) { error = "Hai điểm đầu trùng nhau."; return false; }
+            u = (u - n * u.Dot(n)).Unit();
+            for (int i = 0; i < c.Length; i++)
+                if (System.Math.Abs((c[i] - c[0]).Dot(n)) > 1.0) { error = "Các điểm pick không cùng một mặt phẳng (lệch > 1 mm)."; return false; }
             f = new Frame { Origin = c[0], U = u, N = n, V = n.Cross(u) };
             return true;
         }

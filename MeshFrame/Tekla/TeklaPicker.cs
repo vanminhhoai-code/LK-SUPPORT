@@ -1,54 +1,107 @@
-// Pick 4 điểm trong Tekla qua TeklaApi (reflection). Tách riêng để test được trên SDK giả và đối chiếu hợp đồng với DLL thật.
+// Pick đa giác (N điểm) trong Tekla qua TeklaApi (reflection): sau MỖI điểm vẽ thật trong Tekla (đồ họa tạm) kèm số đo.
+// Kết thúc bằng chuột giữa (Tekla ngắt lệnh pick): từ 3 điểm trở lên coi là hoàn tất, app tự nối điểm cuối về điểm đầu.
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using MeshFrame.Core;
 
 namespace MeshFrame.Tekla
 {
     public sealed class PickResult
     {
-        public V3[] Corners;           // đủ 4 điểm (toạ độ GLOBAL) khi thành công
-        public int Picked;             // số điểm đã pick xong
-        public string StopReason;      // lý do dừng giữa chừng (Esc / lỗi của Tekla)
-        public bool Complete { get { return Corners != null; } }
+        public V3[] Points;                 // các điểm (toạ độ GLOBAL); null nếu chưa đủ 3 điểm
+        public int Picked;                  // số điểm đã pick
+        public string StopReason;           // vì sao dừng (chuột giữa / Esc / lỗi) - tên loại lỗi + nội dung
+        public string DrawNote;             // ghi chú nếu không vẽ được đồ họa (vd Tekla bản cũ không có GraphicsDrawer)
+        public Action Cleanup;              // xóa đồ họa tạm đã vẽ (gọi khi pick lại / thoát)
+        public bool Complete { get { return Points != null; } }
     }
 
     public static class TeklaPicker
     {
-        /// <summary>Lời nhắc hiện trên thanh trạng thái Tekla: CHỈ ASCII (Tekla không hiển thị được tiếng Việt có dấu ở đây).</summary>
-        public static string Prompt(int index)
+        /// <summary>Lời nhắc trên thanh trạng thái Tekla: CHỈ ASCII (Tekla không hiển thị được tiếng Việt có dấu ở đây).</summary>
+        public static string Prompt(int index, double lastLen, double perimeter)
         {
-            return "MeshFrame: pick diem P" + index + " / 4 (lien tiep quanh khung, nguoc chieu kim dong ho nhin tu tren)";
+            string tail = index > 2
+                ? " | doan truoc " + lastLen.ToString("0.0", CultureInfo.InvariantCulture) + " mm | chu vi " + perimeter.ToString("0.0", CultureInfo.InvariantCulture) + " mm"
+                : "";
+            return "MeshFrame: pick diem P" + index + tail + " | chuot giua = ket thuc (>= 3 diem)";
         }
 
-        /// <summary>Pick đủ 4 điểm. Dừng giữa chừng (Esc hay Tekla ném lỗi lúc pick) -> Corners = null kèm StopReason.
-        /// Lỗi khi đổi toạ độ (không phải do người dùng) được ném ra, không bị nuốt.</summary>
-        public static PickResult PickCorners(TeklaApi api, object model)
+        public static PickResult PickPolygon(TeklaApi api, object model)
         {
             object picker = api.New(api.ModelType("UI.Picker"));
             object plane = api.Call(api.Call(model, "GetWorkPlaneHandler"), "GetCurrentTransformationPlane");
             object toGlobal = api.Get(plane, "TransformationMatrixToGlobal");
 
             var res = new PickResult();
-            var c = new V3[4];
-            for (int i = 0; i < 4; i++)
+            object drawer = null;
+            try { drawer = api.New(api.ModelType("UI.GraphicsDrawer")); }
+            catch (Exception) { res.DrawNote = "Tekla bản này không có GraphicsDrawer: số đo chỉ hiện trên thanh trạng thái."; }
+            var ids = new List<object>();
+            res.Cleanup = delegate { Remove(api, drawer, ids); ids.Clear(); };
+
+            var pts = new List<V3>();
+            var local = new List<object>();
+            double perimeter = 0, last = 0;
+            while (true)
             {
+                int k = pts.Count;
                 object p;
                 try
                 {
-                    p = api.Call(picker, "PickPoint", Prompt(i + 1));
+                    string prompt = Prompt(k + 1, last, perimeter);
+                    p = k == 0 ? api.Call(picker, "PickPoint", prompt) : api.Call(picker, "PickPoint", prompt, local[k - 1]);
                 }
-                catch (Exception ex)
+                catch (Exception ex)                                            // chuột giữa / Esc / Tekla dừng pick
                 {
                     while (ex.InnerException != null) ex = ex.InnerException;
                     res.StopReason = ex.GetType().Name + ": " + ex.Message;
-                    return res;
+                    break;
                 }
-                object g = api.Call(toGlobal, "Transform", p);
-                c[i] = new V3(api.GetDouble(g, "X"), api.GetDouble(g, "Y"), api.GetDouble(g, "Z"));
-                res.Picked = i + 1;
+                object g = api.Call(toGlobal, "Transform", p);                  // lỗi đổi toạ độ được ném ra, không nuốt
+                var gp = new V3(api.GetDouble(g, "X"), api.GetDouble(g, "Y"), api.GetDouble(g, "Z"));
+                if (k > 0) { last = (gp - pts[k - 1]).Length; perimeter += last; }
+                pts.Add(gp); local.Add(p);
+                res.Picked = pts.Count;
+                if (drawer != null)
+                {
+                    try { Draw(api, drawer, ids, local, k, last); }
+                    catch (Exception ex) { drawer = null; res.DrawNote = "Không vẽ được đồ họa tạm (" + ex.GetType().Name + "): số đo chỉ hiện trên thanh trạng thái."; }
+                }
             }
-            res.Corners = c;
+            if (pts.Count >= 3) res.Points = pts.ToArray();
             return res;
+        }
+
+        // Điểm k: dấu thập + nhãn "P{k+1}"; từ điểm thứ 2: đoạn nối từ điểm trước + chiều dài ở giữa đoạn.
+        private static void Draw(TeklaApi api, object drawer, List<object> ids, List<object> local, int k, double len)
+        {
+            object red = api.New(api.ModelType("UI.Color"), 1.0, 0.0, 0.0);
+            object blue = api.New(api.ModelType("UI.Color"), 0.0, 0.3, 1.0);
+            double x = api.GetDouble(local[k], "X"), y = api.GetDouble(local[k], "Y"), z = api.GetDouble(local[k], "Z");
+            const double m = 60;
+            ids.Add(api.Call(drawer, "DrawLineSegment", api.Point(x - m, y, z), api.Point(x + m, y, z), red));
+            ids.Add(api.Call(drawer, "DrawLineSegment", api.Point(x, y - m, z), api.Point(x, y + m, z), red));
+            ids.Add(api.Call(drawer, "DrawText", api.Point(x + m, y + m, z), "P" + (k + 1), red));
+            if (k > 0)
+            {
+                double px = api.GetDouble(local[k - 1], "X"), py = api.GetDouble(local[k - 1], "Y"), pz = api.GetDouble(local[k - 1], "Z");
+                ids.Add(api.Call(drawer, "DrawLineSegment", api.Point(px, py, pz), api.Point(x, y, z), blue));
+                ids.Add(api.Call(drawer, "DrawText", api.Point((px + x) / 2, (py + y) / 2, (pz + z) / 2), len.ToString("0.0", CultureInfo.InvariantCulture) + " mm", blue));
+            }
+        }
+
+        private static void Remove(TeklaApi api, object drawer, List<object> ids)
+        {
+            if (drawer == null || ids.Count == 0) return;
+            try
+            {
+                var list = new List<int>();
+                foreach (object o in ids) if (o is int) list.Add((int)o);
+                api.Call(drawer, "RemoveTemporaryGraphicsObjects", list);
+            }
+            catch (Exception) { }
         }
     }
 }

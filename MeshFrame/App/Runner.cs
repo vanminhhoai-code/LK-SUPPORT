@@ -1,6 +1,6 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
-using System.Text;
 using System.Windows.Forms;
 using MeshFrame.Core;
 using MeshFrame.Tekla;
@@ -33,59 +33,56 @@ namespace MeshFrame.App
                 return 3;
             }
 
-            MeshFrameSettings settings = SettingsStore.Load(SettingsPath);
-            while (true)
+            var svc = new TeklaFrameService(api, model);
+            PickResult lastPick = null;
+            Func<V3[]> pick = delegate
             {
-                using (var dlg = new MeshFrameDialog())
+                if (lastPick != null && lastPick.Cleanup != null) lastPick.Cleanup();     // xóa đồ họa tạm của lần pick trước
+                lastPick = TeklaPicker.PickPolygon(api, model);
+                if (!lastPick.Complete)
                 {
-                    dlg.Text = title;
-                    dlg.Settings = settings;
-                    dlg.SelectedObjectProbe = delegate { return TeklaProbe.DumpSelected(api); };
-                    if (dlg.ShowDialog() != DialogResult.OK) break;
-                    settings = dlg.Settings;
+                    MessageBox.Show("Pick dừng ở " + lastPick.Picked + " điểm, cần ít nhất 3 điểm. Chưa có gì được tạo.\n" + lastPick.StopReason, title, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return null;
                 }
-                try { SettingsStore.Save(settings, SettingsPath); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                if (lastPick.DrawNote != null) MessageBox.Show(lastPick.DrawNote, title, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return lastPick.Points;
+            };
 
-                PickResult pick;
-                try { pick = TeklaPicker.PickCorners(api, model); }
-                catch (Exception ex)
+            using (var dlg = new MeshFrameDialog())
+            {
+                dlg.Text = title;
+                dlg.Settings = SettingsStore.Load(SettingsPath);
+                dlg.PickHandler = pick;
+                dlg.SelectedObjectProbe = delegate { return TeklaProbe.DumpSelected(api); };
+                dlg.CreateHandler = delegate (MeshFrameSettings s, V3[] pts)
                 {
-                    MessageBox.Show("Lỗi khi đọc điểm pick:\n" + Root(ex).GetType().Name + ": " + Root(ex).Message, title, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    continue;
-                }
-                if (!pick.Complete)                          // Esc / Tekla dừng pick -> nói rõ, rồi quay lại hộp thoại
+                    ServiceResult r = svc.Create(s, pts);
+                    return new CreateOutcome { Success = r.Success, Message = r.Message };
+                };
+                dlg.EditHandler = delegate
                 {
-                    MessageBox.Show("Pick dừng ở " + pick.Picked + "/4 điểm, chưa tạo gì.\n" + pick.StopReason, title, MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    continue;
+                    string err;
+                    FrameRecord rec = svc.LoadSelected(out err);
+                    return rec == null ? new LoadedFrame { Error = err } : new LoadedFrame { Settings = rec.Settings, Points = rec.Corners, Id = rec.Id };
+                };
+                try
+                {
+                    if (api.HasCatalogs)
+                    {
+                        var items = new List<string[]>();
+                        foreach (RebarEntry e in TeklaCatalog.ReadRebars(api)) items.Add(new[] { e.Grade, e.Size });
+                        dlg.SetRebarCatalog(items);
+                    }
                 }
-                V3[] corners = pick.Corners;
+                catch (Exception) { }                                                     // không đọc được catalog: ô mác/cỡ sợi để nhập tay
 
-                var writer = new TeklaModelWriter(api, model);
-                BuildResult r;
-                try { r = MeshFrameBuilder.Build(settings, corners, writer); }
-                catch (Exception ex)                           // lỗi từ Tekla (profile, catalog, ...)
-                {
-                    MessageBox.Show("Lỗi khi tạo trong Tekla:\n" + Root(ex).Message, title, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    continue;
-                }
-                Report(r, writer, title);
+                V3[] first = pick();                                                      // pick ngay khi mở app; hủy thì vào hộp thoại trống
+                if (first != null) dlg.Points = first;
+                dlg.ShowDialog();
+                try { SettingsStore.Save(dlg.Settings, SettingsPath); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             }
+            if (lastPick != null && lastPick.Cleanup != null) lastPick.Cleanup();
             return 0;
-        }
-
-        private static void Report(BuildResult r, TeklaModelWriter w, string title)
-        {
-            var sb = new StringBuilder();
-            if (r.Success)
-            {
-                MeshFramePlan p = r.Plan;
-                int stiff = 0; foreach (PlanBar b in p.Bars) if (b.Role == BarRole.Stiffener) stiff++;
-                sb.AppendLine(string.Format("Đã tạo: V khung 4, gia cường {0}, nẹp {1}, vít {2}.", stiff, p.Strips.Count, p.Fasteners.Count));
-                foreach (string s in p.Warnings) sb.AppendLine("⚠ " + s);
-                foreach (string s in w.Messages) sb.AppendLine("⚠ " + s);
-            }
-            else foreach (string e in r.Errors) sb.AppendLine("✖ " + e);
-            MessageBox.Show(sb.ToString(), title, MessageBoxButtons.OK, r.Success ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
         }
 
         private static Exception Root(Exception e) { while (e.InnerException != null) e = e.InnerException; return e; }

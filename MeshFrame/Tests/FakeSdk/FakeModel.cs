@@ -1,11 +1,31 @@
-// SDK GIẢ - Tekla.Structures.Model.dll giả. Ghi log mọi thao tác vào FakeLog để test kiểm thứ tự/số lượng.
+// SDK GIẢ - Tekla.Structures.Model.dll giả (dựng theo hình dạng API thật). Ghi log mọi thao tác vào FakeLog.
+// RebarMesh giả mô phỏng điều nghi ngờ ở Tekla thật: thiếu thuộc tính kiểu liệt kê (mặc định UNDEFINED) -> "required info missing".
 using System.Collections;
 using System.Collections.Generic;
 using Tekla.Structures.Geometry3d;
 
 namespace Tekla.Structures.Model
 {
-    public static class FakeLog { public static readonly List<string> Entries = new List<string>(); public static bool RejectInsert; public static bool RejectRebarMesh; public static int FailBeamAt = -1; public static int BeamCount; public static readonly List<double[]> BeamStarts = new List<double[]>(); public static readonly List<ModelObject> Selected = new List<ModelObject>(); public static readonly List<string> BeamPositions = new List<string>(); public static bool NonAsciiPrompt; public static int PickFailAt = -1; public static int Picked; public static void Add(string s) { Entries.Add(s); } }
+    public static class FakeLog
+    {
+        public static readonly List<string> Entries = new List<string>();
+        public static bool RejectInsert, RejectRebarMesh, RejectPolygonMesh, NonAsciiPrompt;
+        public static int FailBeamAt = -1, BeamCount, PickFailAt = -1, Picked;
+        public static readonly List<string> BeamPositions = new List<string>();
+        public static readonly List<double[]> BeamStarts = new List<double[]>();
+        public static readonly List<ModelObject> Selected = new List<ModelObject>();
+        public static readonly List<RebarMesh> Meshes = new List<RebarMesh>();
+        public static readonly List<double[]> PickScript = new List<double[]>();     // điểm do Picker trả về lần lượt; hết thì ném lỗi (chuột giữa)
+        public static readonly List<string> Prompts = new List<string>();
+        public static string ModelPath = "";
+        public static readonly Dictionary<ModelObject, Dictionary<string, string>> Uda = new Dictionary<ModelObject, Dictionary<string, string>>();
+        public static void Add(string s) { Entries.Add(s); }
+        public static void Reset()
+        {
+            Entries.Clear(); BeamPositions.Clear(); BeamStarts.Clear(); Meshes.Clear(); Prompts.Clear(); Uda.Clear(); Selected.Clear();
+            RejectInsert = RejectRebarMesh = RejectPolygonMesh = false; FailBeamAt = -1; BeamCount = 0;
+        }
+    }
 
     public class Profile { public string ProfileString { get; set; } }
     public class Material { public string MaterialString { get; set; } }
@@ -33,11 +53,27 @@ namespace Tekla.Structures.Model
                 FakeLog.BeamPositions.Add(b.Position.Plane + "/" + b.Position.Rotation + "/" + b.Position.Depth);
                 FakeLog.BeamStarts.Add(new[] { b.StartPoint.X, b.StartPoint.Y, b.StartPoint.Z });
             }
-            if (this is RebarMesh && FakeLog.RejectRebarMesh) throw new System.ApplicationException("RebarMesh is not valid for insert, required info missing");
+            var m = this as RebarMesh;
+            if (m != null) m.Validate();
             return !FakeLog.RejectInsert;
         }
         public bool Modify() { FakeLog.Add("Modify " + GetType().Name); return true; }
         public bool Delete() { FakeLog.Add("Delete " + GetType().Name); return true; }
+        public bool SetUserProperty(string name, string value)
+        {
+            Dictionary<string, string> d; if (!FakeLog.Uda.TryGetValue(this, out d)) { d = new Dictionary<string, string>(); FakeLog.Uda[this] = d; }
+            d[name] = value; FakeLog.Add("UDA " + name + "=" + value); return true;
+        }
+        public bool SetUserProperty(string name, int value) { return true; }
+        public bool SetUserProperty(string name, double value) { return true; }
+        public bool GetUserProperty(string name, ref string value)
+        {
+            Dictionary<string, string> d; string v;
+            if (FakeLog.Uda.TryGetValue(this, out d) && d.TryGetValue(name, out v)) { value = v; return true; }
+            return false;
+        }
+        public bool GetUserProperty(string name, ref int value) { return false; }
+        public bool GetUserProperty(string name, ref double value) { return false; }
     }
 
     public interface IAssemblable { }
@@ -51,10 +87,20 @@ namespace Tekla.Structures.Model
         public NumberingSeries AssemblyNumber { get; set; } = new NumberingSeries();
         public Position Position { get; set; } = new Position();
         private static readonly Dictionary<Part, Assembly> asm = new Dictionary<Part, Assembly>();
-        public Assembly GetAssembly() { Assembly a; if (!asm.TryGetValue(this, out a)) { a = new Assembly(); asm[this] = a; } return a; }
+        internal static void Link(Part p, Assembly a) { asm[p] = a; }
+        public Assembly GetAssembly() { Assembly a; if (!asm.TryGetValue(this, out a)) { a = new Assembly(this); asm[this] = a; } return a; }
     }
     public class Beam : Part { public Point StartPoint { get; set; } public Point EndPoint { get; set; } public Beam(Point s, Point e) { StartPoint = s; EndPoint = e; } }
-    public class Assembly : ModelObject { public NumberingSeries AssemblyNumber { get; set; } = new NumberingSeries(); public bool Add(IAssemblable o) { FakeLog.Add("Add " + o.GetType().Name); return true; } }
+    public class Assembly : ModelObject
+    {
+        private readonly Part _main; private readonly ArrayList _sec = new ArrayList();
+        public Assembly(Part main) { _main = main; }
+        public NumberingSeries AssemblyNumber { get; set; } = new NumberingSeries();
+        public bool Add(IAssemblable o) { FakeLog.Add("Add " + o.GetType().Name); _sec.Add(o); var p = o as Part; if (p != null) Part.Link(p, this); return true; }
+        public ModelObject GetMainPart() { return _main; }
+        public ArrayList GetSecondaries() { return _sec; }
+    }
+
     public abstract class Boolean : ModelObject { public ModelObject Father { get; set; } }
     public class Fitting : Boolean { public Plane Plane { get; set; } }
     public class BooleanPart : Boolean
@@ -73,26 +119,52 @@ namespace Tekla.Structures.Model
         public int PointCount { get { return _pts.Count; } }
     }
 
-    public class RebarMesh : ModelObject
+    public abstract class Reinforcement : ModelObject
     {
-        public enum RebarMeshTypeEnum { RECTANGULAR_MESH, POLYGON_MESH, BENT_MESH }
-        public ModelObject Father { get; set; } public Polygon Polygon { get; set; } public RebarMeshTypeEnum MeshType { get; set; }
+        public enum RebarOffsetTypeEnum { OFFSET_TYPE_COVER_THICKNESS, OFFSET_TYPE_LEG_LENGTH }
+        public ModelObject Father { get; set; }
         public string Name { get; set; } public string Grade { get; set; } public int Class { get; set; }
         public NumberingSeries NumberingSeries { get; set; } = new NumberingSeries();
-        public string LongitudinalSize { get; set; } public string CrossSize { get; set; }
-        public ArrayList LongitudinalDistances { get; set; } public ArrayList CrossDistances { get; set; }
+        public ArrayList OnPlaneOffsets { get; set; } = new ArrayList();
+        public double FromPlaneOffset { get; set; }
+        public RebarOffsetTypeEnum StartPointOffsetType { get; set; }
+        public double StartPointOffsetValue { get; set; }
+    }
+
+    public class RebarMesh : Reinforcement
+    {
+        public enum RebarMeshTypeEnum { UNKNOWN_MESH, RECTANGULAR_MESH, POLYGON_MESH, BENT_MESH }
+        public enum RebarMeshSpacingMethodEnum { SPACING_TYPE_UNDEFINED, SPACING_TYPE_SAME_DISTANCE, SPACING_TYPE_MULTIPLE_VARYING_DISTANCES }
+        public enum RebarMeshCrossBarLocationEnum { LOCATION_TYPE_ABOVE, LOCATION_TYPE_BELOW, LOCATION_TYPE_UNDEFINED }
+        public RebarMeshTypeEnum MeshType { get; set; } = RebarMeshTypeEnum.UNKNOWN_MESH;
+        public RebarMeshSpacingMethodEnum LongitudinalSpacingMethod { get; set; } = RebarMeshSpacingMethodEnum.SPACING_TYPE_UNDEFINED;
+        public RebarMeshCrossBarLocationEnum CrossBarLocation { get; set; } = RebarMeshCrossBarLocationEnum.LOCATION_TYPE_UNDEFINED;
+        public Polygon Polygon { get; set; }
+        public ArrayList LongitudinalDistances { get; set; } = new ArrayList();
+        public ArrayList CrossDistances { get; set; } = new ArrayList();
         public Point StartPoint { get; set; } public Point EndPoint { get; set; }
+        public double LeftOverhangLongitudinal { get; set; } public double LeftOverhangCross { get; set; }
+        public double RightOverhangLongitudinal { get; set; } public double RightOverhangCross { get; set; }
+        public string LongitudinalSize { get; set; } public string CrossSize { get; set; }
+        public double Width { get; set; } public double Length { get; set; }
+        public bool CutByFatherPartCuts { get; set; }
+        public string CatalogName { get; set; }
+
+        /// <summary>Mô phỏng Tekla: thiếu thông tin thì từ chối (đúng thông báo của Tekla 21.1 thật).</summary>
+        internal void Validate()
+        {
+            if (FakeLog.RejectRebarMesh || (FakeLog.RejectPolygonMesh && MeshType == RebarMeshTypeEnum.POLYGON_MESH))
+                throw new System.ApplicationException("RebarMesh is not valid for insert, required info missing");
+            bool ok = MeshType != RebarMeshTypeEnum.UNKNOWN_MESH && LongitudinalSpacingMethod != RebarMeshSpacingMethodEnum.SPACING_TYPE_UNDEFINED
+                      && CrossBarLocation != RebarMeshCrossBarLocationEnum.LOCATION_TYPE_UNDEFINED && Father != null && !string.IsNullOrEmpty(CatalogName)
+                      && !string.IsNullOrEmpty(LongitudinalSize) && !string.IsNullOrEmpty(CrossSize) && LongitudinalDistances.Count > 0 && CrossDistances.Count > 0
+                      && !string.IsNullOrEmpty(Grade) && (MeshType != RebarMeshTypeEnum.POLYGON_MESH || (Polygon != null && Polygon.Points.Count >= 3));
+            if (!ok) throw new System.ApplicationException("RebarMesh is not valid for insert, required info missing");
+            FakeLog.Meshes.Add(this);
+        }
     }
 
     public abstract class BoltGroup : ModelObject { public enum BoltTypeEnum { BOLT_TYPE_WORKSHOP, BOLT_TYPE_SITE } }
-    public class BoltArray : BoltGroup
-    {
-        public Part PartToBeBolted { get; set; } public Part PartToBoltTo { get; set; }
-        public Point FirstPosition { get; set; } public Point SecondPosition { get; set; }
-        public double BoltSize { get; set; } public string BoltStandard { get; set; } public double Tolerance { get; set; }
-        public BoltTypeEnum BoltType { get; set; } public double Length { get; set; }
-        public void AddBoltDistX(double d) { } public void AddBoltDistY(double d) { }
-    }
 
     public class TransformationPlane { public Matrix TransformationMatrixToGlobal { get { return new Matrix(); } } public TransformationPlane(Point o, Vector x, Vector y) { FakeLog.Add("PlaneNew"); } public TransformationPlane() { } }
     public class WorkPlaneHandler
@@ -100,15 +172,15 @@ namespace Tekla.Structures.Model
         public TransformationPlane GetCurrentTransformationPlane() { return new TransformationPlane(); }
         public bool SetCurrentTransformationPlane(TransformationPlane p) { FakeLog.Add("SetPlane"); return true; }
     }
+    public class ModelInfo { public string ModelPath { get; set; } }
     public class Model
     {
         public bool GetConnectionStatus() { return true; }
         public WorkPlaneHandler GetWorkPlaneHandler() { return new WorkPlaneHandler(); }
         public bool CommitChanges() { FakeLog.Add("Commit"); return true; }
+        public ModelInfo GetInfo() { return new ModelInfo { ModelPath = FakeLog.ModelPath }; }
     }
-}
-namespace Tekla.Structures.Model
-{
+
     public class ModelObjectEnumerator
     {
         private int _i = -1;
@@ -120,14 +192,28 @@ namespace Tekla.Structures.Model
 namespace Tekla.Structures.Model.UI
 {
     public class ModelObjectSelector { public ModelObjectEnumerator GetSelectedObjects() { return new ModelObjectEnumerator(); } }
+
+    public class Color { public double R, G, B; public Color(double r, double g, double b) { R = r; G = g; B = b; } }
+
+    public class GraphicsDrawer
+    {
+        private int _next = 100;
+        public int DrawLineSegment(Point a, Point b, Color c) { FakeLog.Add("DrawLine"); return _next++; }
+        public int DrawText(Point p, string text, Color c) { FakeLog.Add("DrawText " + text); return _next++; }
+        public bool RemoveTemporaryGraphicsObjects(IEnumerable ids) { int n = 0; foreach (object o in ids) n++; FakeLog.Add("RemoveGraphics " + n); return true; }
+    }
+
     public class Picker
     {
-        public Tekla.Structures.Geometry3d.Point PickPoint(string prompt)
+        private Tekla.Structures.Geometry3d.Point Next(string prompt)
         {
+            FakeLog.Prompts.Add(prompt);
             foreach (char ch in prompt) if (ch > 127) FakeLog.NonAsciiPrompt = true;
-            if (FakeLog.Picked == FakeLog.PickFailAt) throw new System.ApplicationException("User interrupted");
-            FakeLog.Picked++;
-            return new Tekla.Structures.Geometry3d.Point(FakeLog.Picked * 100, FakeLog.Picked * 10, 5);
+            if (FakeLog.Picked == FakeLog.PickFailAt || FakeLog.Picked >= FakeLog.PickScript.Count) throw new System.ApplicationException("User interrupted");
+            double[] c = FakeLog.PickScript[FakeLog.Picked++];
+            return new Tekla.Structures.Geometry3d.Point(c[0], c[1], c[2]);
         }
+        public Tekla.Structures.Geometry3d.Point PickPoint(string prompt) { return Next(prompt); }
+        public Tekla.Structures.Geometry3d.Point PickPoint(string prompt, Tekla.Structures.Geometry3d.Point reference) { return Next(prompt); }
     }
 }

@@ -6,10 +6,8 @@ using System.Globalization;
 namespace MeshFrame.Core
 {
     public enum CornerKind { Miter = 0, OneThrough = 1 }
-    public enum FastenKind { None = 0, Screw = 1, SpotWeld = 2 }
     public enum StiffMode { None = 0, Equal = 1, Custom = 2 }
-    public enum StiffDir { AcrossP1P2 = 0, AcrossP1P4 = 1 }
-    public enum MeshKind { Plate = 0, RebarMesh = 1, None = 2 }   // lưới: tấm mỏng / Reinforcement Mesh / không tạo
+    public enum MeshKind { RebarMesh = 0, Plate = 1, None = 2 }   // lưới: tấm mỏng / Reinforcement Mesh / không tạo
     // Hướng đặt thép góc / nẹp trong Tekla (Position.Plane / Rotation / Depth). Thứ tự khớp tên enum Tekla.
     public enum PlaneKind { Left = 0, Middle = 1, Right = 2 }
     public enum RotationKind { Front = 0, Top = 1, Back = 2, Below = 3 }
@@ -17,7 +15,7 @@ namespace MeshFrame.Core
 
     public class MeshFrameSettings
     {
-        // ---- Khung V (4 thanh quanh 4 điểm pick, mép ngoài trùng đường nối điểm)
+        // ---- Khung V (một thanh cho mỗi cạnh của đa giác pick, mép ngoài trùng đường nối điểm)
         public double VLegA = 25, VLegB = 25, VThk = 2;   // chuẩn V-25x2 (nhập được tiết diện khác)
         public string VMaterial = "MA KEM", VName = "KHUNG V", VClass = "4", VPrefix = "V";
         public int VStartNo = 1;
@@ -27,20 +25,21 @@ namespace MeshFrame.Core
 
         // ---- Gia cường: thanh V CÙNG TIẾT DIỆN với V khung, vuông góc đố trên/dưới, hai đầu cắt khuyết cho khớp V khung
         public StiffMode StiffMode = StiffMode.Equal;
-        public StiffDir StiffDir = StiffDir.AcrossP1P2;   // chia ô dọc cạnh P1-P2 hay P1-P4
+        public int StiffBaseEdge = 0;                     // cạnh gốc (1..N); 0 = tự chọn cạnh dài nhất. Gia cường vuông góc cạnh gốc
         public double StiffMax = 1000;                    // Equal: mỗi ô tối đa
         public string StiffCells = "1000 1000";           // Custom: bề rộng từng ô, vd "1000 2*1500 800"
         public string SMaterial = "MA KEM", SName = "GIA CUONG", SClass = "7", SPrefix = "GC";
         public int SStartNo = 1;
 
         // ---- Lưới
-        public MeshKind MeshKind = MeshKind.Plate;        // mặc định tấm mỏng (luôn tạo được); RebarMesh cần đủ thuộc tính
+        public MeshKind MeshKind = MeshKind.RebarMesh;    // RebarMesh; nếu Tekla từ chối thì tự chuyển sang tấm mỏng
         public double MeshGap = 0, MeshWireDia = 0.37, MeshPitch = 2.37;   // MeshGap: lưới lùi vào so với MÉP NGOÀI khung; chuẩn: ô 2x2, sợi 0.37
         public string MeshName = "LUOI INOX 2x2", MeshGrade = "SUS304", MeshPrefix = "LI";
         public int MeshClass = 6, MeshStartNo = 1;
         public double MeshWeightKgPerM2 = 0;   // 0 = không dùng
+        public string RebarGrade = "", RebarSize = "";   // RebarMesh: mác và cỡ sợi phải CÓ trong catalog rebar Tekla; trống = dùng MeshGrade / MeshWireDia
 
-        // ---- Nẹp (tùy chọn). UseStrip = false -> không nẹp và khóa luôn liên kết
+        // ---- Nẹp (tùy chọn)
         public bool UseStrip = true;
         public double StripWidth = 25, StripThk = 1.2;   // chuẩn PL-25x1.2 (nhập được tiết diện khác)
         public string StripMaterial = "SUS304", StripName = "NEP LUOI", StripClass = "5", StripPrefix = "N";
@@ -48,17 +47,11 @@ namespace MeshFrame.Core
 
         // ---- Tekla: profile (để trống = tự tạo), bolt standard, hướng đặt. Chỉnh khi kết quả trong Tekla lệch.
         public string VProfile = "", StripProfile = "";   // trống = tự tạo; V gia cường dùng chung profile V khung
-        public string BoltStandard = "8.8XOX";
         public PlaneKind VPlane = PlaneKind.Middle, StripPlane = PlaneKind.Middle;   // Middle: đặt theo tim -> V và nẹp trùng tim
         public RotationKind VRotation = RotationKind.Front, StripRotation = RotationKind.Front;
         public DepthKind VDepth = DepthKind.Middle, StripDepth = DepthKind.Middle;
         public double VLateral = 0, StripLateral = 0;   // lệch ngang tinh chỉnh (mm, dương = vào trong khung)
         public bool FlipMiterCut = false;
-        public bool FlipBolt = false;   // đảo chiều vít nếu vít ra ngược
-
-        // ---- Liên kết (chỉ có nghĩa khi UseStrip)
-        public FastenKind Fasten = FastenKind.Screw;
-        public double FastenDia = 6, FastenPitch = 250, FastenEdge = 50;   // chuẩn vít SC06@250
 
         /// <summary>Kiểm tra dữ liệu nhập. Rỗng = hợp lệ.</summary>
         public List<string> Validate()
@@ -72,12 +65,11 @@ namespace MeshFrame.Core
             {
                 if (StripWidth <= 0 || StripThk <= 0) e.Add("Kích thước nẹp phải > 0.");
                 else if (StripWidth <= MeshGap) e.Add("Bề rộng nẹp phải lớn hơn khoảng lùi lưới (nẹp phải đè lên mép lưới).");
-                if (Fasten != FastenKind.None && (FastenPitch <= 0 || FastenEdge < 0)) e.Add("Bước @ phải > 0, khoảng cách tới góc không âm.");
-                if (Fasten == FastenKind.Screw && FastenDia <= 0) e.Add("Đường kính vít phải > 0.");
             }
             if (StiffMode != StiffMode.None)
             {
                 if (StiffMode == StiffMode.Equal && StiffMax <= 0) e.Add("Khoảng cách ô tối đa phải > 0.");
+                if (StiffBaseEdge < 0) e.Add("Cạnh gốc gia cường không hợp lệ.");
                 if (StiffMode == StiffMode.Custom)
                 {
                     List<double> cells; string err;

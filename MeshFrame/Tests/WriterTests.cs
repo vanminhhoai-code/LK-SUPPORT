@@ -1,4 +1,4 @@
-// Test bộ ghi trên SDK GIẢ: kiểm thứ tự/số lượng thao tác và ghi lại mọi thành viên Tekla đã dùng (cho ContractCheck).
+// Test bộ ghi / picker / dịch vụ khung trên SDK GIẢ + ghi lại mọi thành viên Tekla đã dùng (cho ContractCheck đối chiếu DLL thật).
 // Dùng: WriterTests.exe <thư mục chứa Tekla.Structures*.dll giả> <file ghi thành viên>
 using System;
 using System.Collections.Generic;
@@ -6,13 +6,16 @@ using System.IO;
 using System.Linq;
 using MeshFrame.Core;
 using MeshFrame.Tekla;
+using Tekla.Structures.Catalogs;
 using Tekla.Structures.Model;
 
 static class WriterTests
 {
     static int fail, pass;
     static void Check(string n, bool ok) { if (ok) pass++; else { fail++; Console.WriteLine("FAIL: " + n); } }
-    static int Count(string prefix) { return FakeLog.Entries.Count(e => e == prefix); }
+    static int Count(string e) { return FakeLog.Entries.Count(x => x == e); }
+    static int CountStart(string prefix) { return FakeLog.Entries.Count(x => x.StartsWith(prefix)); }
+    static void Reset() { FakeLog.Reset(); FakeCatalog.Reset(); }
 
     static int Main(string[] a)
     {
@@ -21,126 +24,201 @@ static class WriterTests
         api.Trace = delegate (string s) { used.Add(s); };
 
         var corners = new[] { new V3(0, 0, 5000), new V3(4000, 0, 5000), new V3(4000, 1200, 5120), new V3(0, 1200, 5120) };
+        var penta = new[] { new V3(0, 0, 0), new V3(2500, 0, 0), new V3(3000, 800, 0), new V3(1500, 1300, 0), new V3(-200, 700, 0) };
 
-        // --- đầy đủ: khung + 3 gia cường + nẹp + lưới + vít
-        FakeLog.Entries.Clear();
-        var w = new TeklaModelWriter(api, null);
+        // ---------------------------------------------------------------- mặc định: RebarMesh đủ thuộc tính
+        Reset();
+        var w = new TeklaModelWriter(api, null) { FrameId = "abc123" };
         BuildResult r = MeshFrameBuilder.Build(new MeshFrameSettings(), corners, w);
-        Check("build ok", r.Success);
+        Check("build ok", r.Success && w.Messages.Count == 0);
         Check("14 beam (7 V + 7 nep)", Count("Insert Beam") == 14);
         Check("16 fitting (4 V + 4 nep, 2 dau)", Count("Insert Fitting") == 16);
-        Check("mac dinh: luoi dang tam (khong RebarMesh)", Count("Insert RebarMesh") == 0);
-        Check("khuyet: 6 tam cat + 1 tam luoi = 7 ContourPlate, 6 BooleanPart, xoa dung 6 tam cat", Count("Insert ContourPlate") == 7 && Count("Insert BooleanPart") == 6 && Count("Delete ContourPlate") == 6);
+        Check("khuyet: 6 tam cat + 6 BooleanPart + xoa 6 tam cat", Count("Insert ContourPlate") == 6 && Count("Insert BooleanPart") == 6 && Count("Delete ContourPlate") == 6);
         Check("tam cat dung class BlOpCl cua Tekla", FakeLog.Entries.Count(e => e == "Cut BlOpCl by plate") == 6);
-        Check("tam cat khong vao assembly, tam luoi vao assembly", Count("Add ContourPlate") == 1);
-        Check("7 BoltArray (1/nep)", Count("Insert BoltArray") == 7);
-        Check("assembly: 13 beam + Modify", Count("Add Beam") == 13 && Count("Modify Assembly") == 1);
+        Check("RebarMesh: 1 lan chen", Count("Insert RebarMesh") == 1 && FakeLog.Meshes.Count == 1);
+        var m = FakeLog.Meshes[0];
+        Check("RebarMesh: MeshType POLYGON + spacing SAME_DISTANCE + cross bar ABOVE (khong UNDEFINED)",
+              m.MeshType == RebarMesh.RebarMeshTypeEnum.POLYGON_MESH && m.LongitudinalSpacingMethod == RebarMesh.RebarMeshSpacingMethodEnum.SPACING_TYPE_SAME_DISTANCE
+              && m.CrossBarLocation == RebarMesh.RebarMeshCrossBarLocationEnum.LOCATION_TYPE_ABOVE);
+        Check("RebarMesh: buoc soi 2.37 hai huong, OnPlaneOffsets 1 phan tu, offset 0, CutByFatherPartCuts false",
+              m.LongitudinalDistances.Count == 1 && (double)m.LongitudinalDistances[0] == 2.37 && m.CrossDistances.Count == 1 && m.OnPlaneOffsets.Count == 1 && m.FromPlaneOffset == 0 && !m.CutByFatherPartCuts);
+        Check("RebarMesh: mac SUS304, co soi 0.37, CatalogName, 4 diem da giac", m.Grade == "SUS304" && m.LongitudinalSize == "0.37" && m.CrossSize == "0.37" && !string.IsNullOrEmpty(m.CatalogName) && m.Polygon.Points.Count == 4);
+        Check("RebarMesh: Father la V khung dau tien", m.Father is Beam && FakeLog.Uda.ContainsKey(m.Father));
+        Check("RebarMesh: ap dung overhang 0 + offset type COVER", m.LeftOverhangCross == 0 && m.RightOverhangLongitudinal == 0 && m.StartPointOffsetType == Reinforcement.RebarOffsetTypeEnum.OFFSET_TYPE_COVER_THICKNESS);
+        Check("assembly: 13 beam, khong tam luoi, Modify 1", Count("Add Beam") == 13 && Count("Add ContourPlate") == 0 && Count("Modify Assembly") == 1);
+        Check("gan ma khung vao part chinh", Count("UDA MESHFRAME_ID=abc123") == 1 && w.MainPart != null && FakeLog.Uda.ContainsKey((ModelObject)w.MainPart));
         Check("mat phang doi roi tra lai + commit", Count("SetPlane") == 2 && Count("Commit") == 1);
-        Check("khong co canh bao", w.Messages.Count == 0);
         Check("mat phang dat truoc khi chen", FakeLog.Entries.IndexOf("SetPlane") < FakeLog.Entries.IndexOf("Insert Beam"));
-        Check("luoi chen sau thanh", FakeLog.Entries.LastIndexOf("Insert ContourPlate") > FakeLog.Entries.LastIndexOf("Insert Beam"));
+        Check("khong con bolt nao", !FakeLog.Entries.Any(e => e.Contains("Bolt")));
 
-        // --- RebarMesh chọn tay: chèn được, không vào assembly
-        FakeLog.Entries.Clear();
+        // ---------------------------------------------------------------- kiểm tra catalog rebar -> lưới tấm dự phòng
+        Reset();
         w = new TeklaModelWriter(api, null);
-        MeshFrameBuilder.Build(new MeshFrameSettings { MeshKind = MeshKind.RebarMesh }, corners, w);
-        Check("RebarMesh: 1 mesh, khong tam luoi, khong vao assembly", Count("Insert RebarMesh") == 1 && Count("Insert ContourPlate") == 6 && Count("Add ContourPlate") == 0 && w.Messages.Count == 0);
-
-        // --- RebarMesh lỗi (như Tekla 21.1 thật): KHÔNG làm mất vít + assembly, chỉ cảnh báo
-        FakeLog.Entries.Clear(); FakeLog.RejectRebarMesh = true;
+        r = MeshFrameBuilder.Build(new MeshFrameSettings { RebarGrade = "XYZ" }, corners, w);
+        Check("mac khong co trong catalog: canh bao nua cac mac co, khong thu RebarMesh", w.Messages.Count == 1 && w.Messages[0].Contains("'XYZ'") && w.Messages[0].Contains("SUS304, B500B") && Count("Insert RebarMesh") == 0);
+        Check("mac sai: thay bang luoi tam (7 ContourPlate, vao assembly)", Count("Insert ContourPlate") == 7 && Count("Add ContourPlate") == 1 && Count("Modify Assembly") == 1 && r.Success);
+        Reset();
         w = new TeklaModelWriter(api, null);
-        r = MeshFrameBuilder.Build(new MeshFrameSettings { MeshKind = MeshKind.RebarMesh }, corners, w);
-        FakeLog.RejectRebarMesh = false;
-        Check("RebarMesh loi: van thanh cong", r.Success);
-        Check("RebarMesh loi: van tao vit + gop assembly", Count("Insert BoltArray") == 7 && Count("Modify Assembly") == 1 && Count("Add Beam") == 13);
-        Check("RebarMesh loi: canh bao ro ly do", w.Messages.Count == 1 && w.Messages[0].Contains("required info missing") && w.Messages[0].Contains("vẫn được tạo"));
-        Check("RebarMesh loi: van tra mat phang + commit", Count("SetPlane") == 2 && Count("Commit") == 1);
+        MeshFrameBuilder.Build(new MeshFrameSettings { RebarGrade = "B500B", RebarSize = "5" }, corners, w);
+        Check("co soi khong co cho mac: bao cac co co (6, 8)", w.Messages.Count == 1 && w.Messages[0].Contains("'5'") && w.Messages[0].Contains("6, 8") && Count("Insert ContourPlate") == 7);
+        Reset();
+        w = new TeklaModelWriter(api, null);
+        MeshFrameBuilder.Build(new MeshFrameSettings { RebarGrade = "B500B", RebarSize = "6" }, corners, w);
+        Check("mac + co soi hop le trong catalog: tao RebarMesh", w.Messages.Count == 0 && Count("Insert RebarMesh") == 1 && FakeLog.Meshes[0].LongitudinalSize == "6" && FakeLog.Meshes[0].Grade == "B500B");
+        Reset(); FakeCatalog.Connected = false;
+        w = new TeklaModelWriter(api, null);
+        MeshFrameBuilder.Build(new MeshFrameSettings(), corners, w);
+        Check("khong doc duoc catalog: bo qua kiem tra, van thu RebarMesh", w.Messages.Count == 0 && Count("Insert RebarMesh") == 1);
 
-        // --- không tạo lưới
-        FakeLog.Entries.Clear();
+        // ---------------------------------------------------------------- Tekla từ chối RebarMesh
+        Reset(); FakeLog.RejectRebarMesh = true;
+        w = new TeklaModelWriter(api, null) { FrameId = "x1" };
+        r = MeshFrameBuilder.Build(new MeshFrameSettings(), corners, w);
+        Check("RebarMesh bi tu choi: thu da giac roi chu nhat (2 lan), thay bang tam", Count("Insert RebarMesh") == 2 && Count("Insert ContourPlate") == 7 && r.Success);
+        Check("canh bao co ly do cua Tekla + noi ro da thay bang tam", w.Messages.Count == 1 && w.Messages[0].Contains("required info missing") && w.Messages[0].Contains("lưới dạng tấm"));
+        Check("van gop assembly day du + gan ma", Count("Add Beam") == 13 && Count("Add ContourPlate") == 1 && Count("Modify Assembly") == 1 && CountStart("UDA ") == 1);
+        Check("van tra mat phang + commit", Count("SetPlane") == 2 && Count("Commit") == 1);
+        Reset(); FakeLog.RejectPolygonMesh = true;
+        w = new TeklaModelWriter(api, null);
+        MeshFrameBuilder.Build(new MeshFrameSettings(), corners, w);
+        Check("da giac bi tu choi nhung chu nhat duoc: RECTANGULAR_MESH, khong can tam", Count("Insert RebarMesh") == 2 && FakeLog.Meshes.Count == 1 && FakeLog.Meshes[0].MeshType == RebarMesh.RebarMeshTypeEnum.RECTANGULAR_MESH
+              && Count("Insert ContourPlate") == 6 && w.Messages.Count == 1 && w.Messages[0].Contains("chữ nhật"));
+        Check("RECTANGULAR_MESH khong dat Polygon", FakeLog.Meshes[0].Polygon == null);
+        Reset(); FakeLog.RejectRebarMesh = true;
+        w = new TeklaModelWriter(api, null);
+        MeshFrameBuilder.Build(new MeshFrameSettings(), penta, w);
+        Check("ngu giac bi tu choi: chi thu 1 lan (khong phai chu nhat), thay bang tam", Count("Insert RebarMesh") == 1 && Count("Insert ContourPlate") >= 1 && Count("Add ContourPlate") == 1 && w.Messages.Count == 1);
+
+        // ---------------------------------------------------------------- kiểu lưới khác
+        Reset();
+        w = new TeklaModelWriter(api, null);
+        MeshFrameBuilder.Build(new MeshFrameSettings { MeshKind = MeshKind.Plate }, corners, w);
+        Check("luoi tam theo y/c: 7 ContourPlate, khong RebarMesh, khong canh bao", Count("Insert RebarMesh") == 0 && Count("Insert ContourPlate") == 7 && Count("Add ContourPlate") == 1 && w.Messages.Count == 0);
+        Reset();
         w = new TeklaModelWriter(api, null);
         MeshFrameBuilder.Build(new MeshFrameSettings { MeshKind = MeshKind.None }, corners, w);
-        Check("khong luoi: khong tam luoi, khong RebarMesh", Count("Insert RebarMesh") == 0 && Count("Insert ContourPlate") == 6 && Count("Add ContourPlate") == 0 && Count("Insert BoltArray") == 7);
+        Check("khong tao luoi", Count("Insert RebarMesh") == 0 && Count("Insert ContourPlate") == 6 && Count("Add ContourPlate") == 0);
 
-        // --- lỗi nặng giữa chừng: xóa sạch những gì đã tạo, không gộp assembly
-        FakeLog.Entries.Clear(); FakeLog.BeamCount = 0; FakeLog.FailBeamAt = 3;
+        // ---------------------------------------------------------------- đa giác 5 điểm
+        Reset();
+        w = new TeklaModelWriter(api, null);
+        r = MeshFrameBuilder.Build(new MeshFrameSettings { StiffMode = StiffMode.None }, penta, w);
+        Check("ngu giac: 5 V + 5 nep, 20 fitting (cat vat moi dau), RebarMesh 5 diem", r.Success && Count("Insert Beam") == 10 && Count("Insert Fitting") == 20 && FakeLog.Meshes.Count == 1 && FakeLog.Meshes[0].Polygon.Points.Count == 5);
+
+        // ---------------------------------------------------------------- lỗi nặng -> xóa sạch, không gộp
+        Reset(); FakeLog.FailBeamAt = 3;
         bool rolled = false;
         try { MeshFrameBuilder.Build(new MeshFrameSettings(), corners, new TeklaModelWriter(api, null)); }
         catch (InvalidOperationException) { rolled = true; }
-        FakeLog.FailBeamAt = -1;
-        Check("beam thu 3 loi -> nem loi", rolled);
-        Check("rollback: xoa 2 beam da tao, khong gop assembly", Count("Delete Beam") == 2 && Count("Modify Assembly") == 0);
-        Check("rollback: van tra mat phang + commit", Count("SetPlane") == 2 && Count("Commit") == 1);
-
-        // --- đường tham chiếu: đặt theo tim (Middle) -> V cách mép ngoài legA/2, cao legB/2; nẹp ở tim nẹp, ngoài lưới
-        FakeLog.Entries.Clear(); FakeLog.BeamStarts.Clear(); FakeLog.BeamCount = 0;
-        MeshFrameBuilder.Build(new MeshFrameSettings(), corners, new TeklaModelWriter(api, null));
-        double[] v0 = FakeLog.BeamStarts[0], s0 = FakeLog.BeamStarts[7];
-        Check("V khung: tham chieu o tim canh nam (y=12.5) va tim chieu cao (z=12.5)", Math.Abs(v0[0] - 0) < 1e-6 && Math.Abs(v0[1] - 12.5) < 1e-6 && Math.Abs(v0[2] - 12.5) < 1e-6);
-        Check("nep: tim o y=12.5 (trung tim canh nam V), z = -0.74 - 0.6", Math.Abs(s0[0] - 12.5) < 1e-6 && Math.Abs(s0[1] - 12.5) < 1e-6 && Math.Abs(s0[2] - (-1.34)) < 1e-6);
-        Check("V va nep cung tim ngang (y)", Math.Abs(v0[1] - s0[1]) < 1e-6);
-        FakeLog.Entries.Clear(); FakeLog.BeamStarts.Clear(); FakeLog.BeamCount = 0;
-        MeshFrameBuilder.Build(new MeshFrameSettings { VLateral = 3, StripLateral = -2, StiffMode = StiffMode.None }, corners, new TeklaModelWriter(api, null));
-        Check("lech ngang nguoi dung cong vao", Math.Abs(FakeLog.BeamStarts[0][1] - 15.5) < 1e-6 && Math.Abs(FakeLog.BeamStarts[4][1] - 10.5) < 1e-6);
-
-        // --- đọc đối tượng đang chọn (lưới mẫu)
-        FakeLog.Selected.Clear();
-        var sample = new RebarMesh { Name = "SAMPLE-MESH", Grade = "SUS304", Class = 6, LongitudinalSize = "0.37" };
-        sample.Father = null; FakeLog.Selected.Add(sample);
-        string probe = TeklaProbe.DumpSelected(api);
-        string dump = File.ReadAllText(TeklaProbe.OutputPath);
-        Check("doc luoi mau: ghi file", probe.Contains("selected-object.txt") && dump.Contains("RebarMesh"));
-        Check("doc luoi mau: co thuoc tinh va gia tri", dump.Contains("Name = SAMPLE-MESH") && dump.Contains("LongitudinalSize = 0.37") && dump.Contains("Class = 6"));
-        FakeLog.Selected.Clear();
-        Check("doc luoi mau: chua chon -> nhac", TeklaProbe.DumpSelected(api).Contains("Chưa chọn"));
-
-        // --- không nẹp, không gia cường
-        FakeLog.Entries.Clear();
-        w = new TeklaModelWriter(api, null);
-        r = MeshFrameBuilder.Build(new MeshFrameSettings { UseStrip = false, StiffMode = StiffMode.None }, corners, w);
-        Check("khong nep: 4 beam, 4 fitting, 0 bolt", r.Success && Count("Insert Beam") == 4 && Count("Insert Fitting") == 8 && Count("Insert BoltArray") == 0);
-
-        // --- hàn điểm: cảnh báo, không bolt
-        FakeLog.Entries.Clear();
-        w = new TeklaModelWriter(api, null);
-        MeshFrameBuilder.Build(new MeshFrameSettings { Fasten = FastenKind.SpotWeld }, corners, w);
-        Check("han diem: canh bao + khong bolt", Count("Insert BoltArray") == 0 && w.Messages.Count == 1);
-
-        // --- Tekla từ chối Insert -> lỗi rõ + vẫn trả mặt phẳng làm việc
-        FakeLog.Entries.Clear(); FakeLog.BeamCount = 0; FakeLog.RejectInsert = true;
+        Check("beam thu 3 loi -> nem loi; rollback xoa 2 beam, khong gop, van tra mat phang", rolled && Count("Delete Beam") == 2 && Count("Modify Assembly") == 0 && Count("SetPlane") == 2 && Count("Commit") == 1);
+        Reset(); FakeLog.RejectInsert = true;
         bool threw = false;
         try { MeshFrameBuilder.Build(new MeshFrameSettings(), corners, new TeklaModelWriter(api, null)); }
         catch (InvalidOperationException e) { threw = e.Message.Contains("profile"); }
-        FakeLog.RejectInsert = false;
-        Check("Insert false -> loi nhac kiem tra profile", threw);
-        Check("loi van tra mat phang + commit", Count("SetPlane") == 2 && Count("Commit") == 1);
+        Check("Tekla tu choi Insert -> loi nhac kiem tra profile", threw);
 
-        // --- mọi giá trị enum hướng đặt người dùng chọn được phải là enum Tekla có thật (ghi vào members để đối chiếu DLL thật)
+        // ---------------------------------------------------------------- đường tham chiếu (tim)
+        Reset();
+        MeshFrameBuilder.Build(new MeshFrameSettings { StiffMode = StiffMode.None }, corners, new TeklaModelWriter(api, null));
+        double[] v0 = FakeLog.BeamStarts[0], s0 = FakeLog.BeamStarts[4];
+        Check("V khung: tham chieu o tim canh nam (y=12.5) va tim chieu cao (z=12.5)", Math.Abs(v0[0]) < 1e-6 && Math.Abs(v0[1] - 12.5) < 1e-6 && Math.Abs(v0[2] - 12.5) < 1e-6);
+        Check("nep: tim o y=12.5, z = -0.74 - 0.6", Math.Abs(s0[0] - 12.5) < 1e-6 && Math.Abs(s0[1] - 12.5) < 1e-6 && Math.Abs(s0[2] + 1.34) < 1e-6);
+        Reset();
+        MeshFrameBuilder.Build(new MeshFrameSettings { VLateral = 3, StripLateral = -2, StiffMode = StiffMode.None }, corners, new TeklaModelWriter(api, null));
+        Check("lech ngang nguoi dung cong vao", Math.Abs(FakeLog.BeamStarts[0][1] - 15.5) < 1e-6 && Math.Abs(FakeLog.BeamStarts[4][1] - 10.5) < 1e-6);
+        Reset();
+        MeshFrameBuilder.Build(new MeshFrameSettings { VPlane = PlaneKind.Right, VRotation = RotationKind.Below, VDepth = DepthKind.Middle, StiffMode = StiffMode.None, UseStrip = false }, corners, new TeklaModelWriter(api, null));
+        Check("huong dat tu thong so ghi vao beam", FakeLog.BeamPositions.Count == 4 && FakeLog.BeamPositions.All(x => x == "RIGHT/BELOW/MIDDLE"));
         foreach (PlaneKind k in Enum.GetValues(typeof(PlaneKind))) api.Enum("Position+PlaneEnum", PlanPlacement.Name(k));
         foreach (RotationKind k in Enum.GetValues(typeof(RotationKind))) api.Enum("Position+RotationEnum", PlanPlacement.Name(k));
         foreach (DepthKind k in Enum.GetValues(typeof(DepthKind))) api.Enum("Position+DepthEnum", PlanPlacement.Name(k));
 
-        // --- hướng đặt từ plan thật sự được ghi vào Tekla
-        FakeLog.Entries.Clear(); FakeLog.BeamPositions.Clear();
-        var set = new MeshFrameSettings { VPlane = PlaneKind.Right, VRotation = RotationKind.Below, VDepth = DepthKind.Middle, StiffMode = StiffMode.None, UseStrip = false };
-        MeshFrameBuilder.Build(set, corners, new TeklaModelWriter(api, null));
-        Check("huong dat tu thong so duoc ghi vao beam", FakeLog.BeamPositions.Count == 4 && FakeLog.BeamPositions.All(x => x == "RIGHT/BELOW/MIDDLE"));
+        // ---------------------------------------------------------------- pick đa giác: vẽ điểm thật + số đo
+        Reset(); FakeLog.Picked = 0; FakeLog.PickFailAt = -1;
+        FakeLog.PickScript.Clear();
+        foreach (var p in new[] { new[] { 0.0, 0, 0 }, new[] { 3000.0, 0, 0 }, new[] { 3000.0, 1000, 0 }, new[] { 1500.0, 1600, 0 }, new[] { 0.0, 1000, 0 } }) FakeLog.PickScript.Add(p);
+        PickResult pr = TeklaPicker.PickPolygon(api, new Tekla.Structures.Model.Model());
+        Check("pick 5 diem roi chuot giua: du diem, ghi ly do dung", pr.Complete && pr.Points.Length == 5 && pr.Picked == 5 && pr.StopReason != null && pr.StopReason.Contains("interrupted"));
+        Check("toa do GLOBAL dung", pr.Points[1].X == 3000 && pr.Points[3].Y == 1600);
+        Check("ve that: moi diem 2 net thap + 1 nhan; tu diem 2 them doan noi + so do", Count("DrawLine") == 5 * 2 + 4 && CountStart("DrawText") == 5 + 4);
+        Check("nhan diem P1..P5 va so do doan (3000.0 mm, 1000.0 mm)", Count("DrawText P1") == 1 && Count("DrawText P5") == 1 && Count("DrawText 3000.0 mm") == 1 && FakeLog.Entries.Contains("DrawText 1000.0 mm"));
+        Check("loi nhac diem 1, 2: chua co doan truoc", !FakeLog.Prompts[0].Contains("doan truoc") && !FakeLog.Prompts[1].Contains("doan truoc"));
+        Check("loi nhac diem 3: doan truoc 3000.0 mm, chu vi 3000.0 mm", FakeLog.Prompts[2].Contains("doan truoc 3000.0 mm") && FakeLog.Prompts[2].Contains("chu vi 3000.0 mm"));
+        Check("loi nhac diem 4: doan truoc 1000.0 mm, chu vi cong don 4000.0 mm", FakeLog.Prompts[3].Contains("doan truoc 1000.0 mm") && FakeLog.Prompts[3].Contains("chu vi 4000.0 mm"));
+        Check("loi nhac chi ASCII + huong dan chuot giua", !FakeLog.NonAsciiPrompt && FakeLog.Prompts.All(x => x.Contains("chuot giua")));
+        Check("do hoa duoc giu cho den khi Cleanup", CountStart("RemoveGraphics") == 0);
+        pr.Cleanup();
+        Check("Cleanup xoa dung 23 do hoa tam", Count("RemoveGraphics 23") == 1);
+        Reset(); FakeLog.Picked = 0; FakeLog.PickScript.Clear();
+        FakeLog.PickScript.Add(new[] { 0.0, 0, 0 }); FakeLog.PickScript.Add(new[] { 100.0, 0, 0 });
+        pr = TeklaPicker.PickPolygon(api, new Tekla.Structures.Model.Model());
+        Check("chi 2 diem roi ngat: chua du, bao ly do", !pr.Complete && pr.Picked == 2 && pr.StopReason != null);
 
-        // --- pick 4 điểm (hồi quy: Point.X/Y/Z là FIELD, trước đây lỗi sau lần pick đầu)
-        FakeLog.Picked = 0; FakeLog.PickFailAt = -1;
-        PickResult pr = TeklaPicker.PickCorners(api, new Tekla.Structures.Model.Model());
-        Check("pick du 4 diem", pr.Complete && pr.Picked == 4 && pr.Corners[3].X == 400 && pr.Corners[0].Y == 10 && pr.Corners[0].Z == 5);
-        FakeLog.Picked = 0; FakeLog.PickFailAt = 1;                    // Esc ở điểm thứ 2
-        pr = TeklaPicker.PickCorners(api, new Tekla.Structures.Model.Model());
-        Check("Esc o diem 2: dung, noi ro ly do", !pr.Complete && pr.Picked == 1 && pr.StopReason != null && pr.StopReason.Contains("interrupted"));
-        FakeLog.PickFailAt = -1;
-        Check("loi nhac pick chi ASCII (Tekla loi font neu co dau)", !FakeLog.NonAsciiPrompt);
+        // ---------------------------------------------------------------- dịch vụ khung: tạo -> sửa (thay) -> giữ khung cũ khi lỗi
+        Reset();
+        string folder = Path.Combine(Path.GetTempPath(), "mf_test_" + Guid.NewGuid().ToString("N"));
+        FakeLog.ModelPath = folder;
+        var svc = new TeklaFrameService(api, new Tekla.Structures.Model.Model());
+        var s1 = new MeshFrameSettings { VLegA = 25 };
+        ServiceResult sr = svc.Create(s1, corners);
+        Check("dich vu: tao khung moi OK, co ma, thong bao so luong", sr.Success && sr.FrameId != null && sr.Message.Contains("4 V khung") && sr.Message.Contains("3 gia cường") && sr.Message.Contains("7 nẹp"));
+        string recPath = TeklaFrameStore.RecordPath(folder, sr.FrameId);
+        FrameRecord rec = FrameRecord.Load(recPath);
+        Check("ban ghi khung luu canh model: ma + thong so + 4 diem", rec != null && rec.Id == sr.FrameId && rec.Corners.Length == 4 && Math.Abs(rec.Settings.VLegA - 25) < 1e-9 && rec.Corners[2].Z == 5120);
+        ModelObject frameMain = FakeLog.Uda.Keys.First();
+        ModelObject secondary = (ModelObject)((Part)frameMain).GetAssembly().GetSecondaries()[3];
+        FakeLog.Selected.Clear(); FakeLog.Selected.Add(secondary);
+        string err;
+        FrameRecord loaded = svc.LoadSelected(out err);
+        if (loaded == null) Console.WriteLine("DEBUG LoadSelected: " + err);
+        Check("chon 1 part PHU cua khung -> tim ra khung qua assembly", loaded != null && loaded.Id == sr.FrameId && svc.EditingId == sr.FrameId && err == null);
+        FakeLog.Entries.Clear();
+        var s2 = new MeshFrameSettings { VLegA = 30, VLegB = 30, StripWidth = 30 };
+        ServiceResult sr2 = svc.Create(s2, loaded.Corners);
+        Check("sua: tao khung moi roi xoa khung cu (14 part), cung ma", sr2.Success && sr2.FrameId == sr.FrameId && Count("Delete Beam") == 14 && sr2.Message.Contains("Đã thay khung cũ"));
+        Check("sua: xoa SAU khi tao khung moi", FakeLog.Entries.IndexOf("Delete Beam") > FakeLog.Entries.LastIndexOf("Insert Beam"));
+        Check("sua: ban ghi duoc ghi de bang thong so moi, het che do sua", FrameRecord.Load(recPath).Settings.VLegA == 30 && svc.EditingId == null);
+        // lỗi khi sửa -> giữ khung cũ
+        ModelObject main2 = FakeLog.Uda.Keys.Last();
+        FakeLog.Selected.Clear(); FakeLog.Selected.Add(main2);
+        loaded = svc.LoadSelected(out err);
+        FakeLog.Entries.Clear(); FakeLog.BeamCount = 0; FakeLog.FailBeamAt = 3;
+        ServiceResult sr3 = svc.Create(s2, loaded.Corners);
+        FakeLog.FailBeamAt = -1;
+        Check("sua bi loi: bao 'giu nguyen khung cu', chi rollback khung moi (2 beam), van o che do sua", !sr3.Success && sr3.Message.Contains("giữ nguyên") && Count("Delete Beam") == 2 && svc.EditingId != null);
+        // không chọn / thiếu bản ghi
+        FakeLog.Selected.Clear();
+        Check("khong chon gi: bao chua chon khung", svc.LoadSelected(out err) == null && err.Contains("Chưa chọn khung"));
+        File.Delete(recPath);
+        FakeLog.Selected.Add(main2);
+        Check("co ma nhung mat ban ghi: bao ro", svc.LoadSelected(out err) == null && err.Contains("không có bản ghi"));
+        FakeLog.ModelPath = "";
+        var svc2 = new TeklaFrameService(api, new Tekla.Structures.Model.Model());
+        ServiceResult sr4 = svc2.Create(s1, corners);
+        Check("model chua luu: van tao, canh bao khong luu duoc ban ghi", sr4.Success && sr4.Message.Contains("Model chưa lưu"));
+        try { Directory.Delete(folder, true); } catch (IOException) { }
 
-        // --- SdkThread hook
+        // ---------------------------------------------------------------- đọc catalog (cho ô chọn mác/cỡ sợi trong app)
+        FakeCatalog.Reset();
+        var rebars = TeklaCatalog.ReadRebars(api);
+        Check("doc catalog rebar: 3 muc", rebars.Count == 3 && rebars[0].Grade == "SUS304" && rebars[0].Size == "0.37");
+        Check("catalog Check: hop le -> null", TeklaCatalog.Check(api, "SUS304", "0.37") == null);
+
+        // ---------------------------------------------------------------- đọc đối tượng đang chọn (lưới mẫu)
+        Reset();
+        var sample = new RebarMesh { Name = "SAMPLE-MESH", Grade = "SUS304", Class = 6, LongitudinalSize = "0.37" };
+        FakeLog.Selected.Add(sample);
+        string probe = TeklaProbe.DumpSelected(api);
+        string dump = File.ReadAllText(TeklaProbe.OutputPath);
+        Check("doc luoi mau: ghi file, co thuoc tinh va gia tri", probe.Contains("selected-object.txt") && dump.Contains("Name = SAMPLE-MESH") && dump.Contains("LongitudinalSize = 0.37") && dump.Contains("MeshType = UNKNOWN_MESH"));
+        FakeLog.Selected.Clear();
+        Check("doc luoi mau: chua chon -> nhac", TeklaProbe.DumpSelected(api).Contains("Chưa chọn"));
+
+        // ---------------------------------------------------------------- mọi lời gọi SDK đi qua Invoke (SdkThread của Cover Tool)
         int hooked = 0;
         api.Invoke = delegate (Func<object> f) { hooked++; return f(); };
-        FakeLog.Entries.Clear();
-        MeshFrameBuilder.Build(new MeshFrameSettings { UseStrip = false, StiffMode = StiffMode.None }, corners, new TeklaModelWriter(api, null));
+        Reset();
+        MeshFrameBuilder.Build(new MeshFrameSettings { StiffMode = StiffMode.None, UseStrip = false }, corners, new TeklaModelWriter(api, null));
         Check("moi loi goi SDK qua Invoke", hooked > 50);
 
         File.WriteAllLines(a[1], used.OrderBy(x => x).ToArray());

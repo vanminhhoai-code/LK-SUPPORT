@@ -8,11 +8,11 @@ using System.Reflection;
 
 static class ContractCheck
 {
-    static Assembly model, geo;
+    static Assembly model, geo, cat;
 
     static Type Find(string full)
     {
-        return model.GetType(full) ?? geo.GetType(full);
+        return model.GetType(full) ?? geo.GetType(full) ?? (cat == null ? null : cat.GetType(full));
     }
 
     static bool Compat(Type param, string chain)
@@ -31,7 +31,13 @@ static class ContractCheck
     static bool ParamsMatch(ParameterInfo[] ps, string[] chains)
     {
         if (ps.Length != chains.Length) return false;
-        for (int i = 0; i < ps.Length; i++) if (ps[i].ParameterType.IsByRef || !Compat(ps[i].ParameterType, chains[i])) return false;
+        for (int i = 0; i < ps.Length; i++)
+        {
+            bool byRefArg = chains[i].EndsWith("&");
+            if (ps[i].ParameterType.IsByRef != byRefArg) return false;
+            Type pt = ps[i].ParameterType.IsByRef ? ps[i].ParameterType.GetElementType() : ps[i].ParameterType;
+            if (!Compat(pt, chains[i].TrimEnd('&'))) return false;
+        }
         return true;
     }
 
@@ -45,6 +51,8 @@ static class ContractCheck
         };
         geo = Assembly.LoadFrom(Path.Combine(dir, "Tekla.Structures.dll"));
         model = Assembly.LoadFrom(Path.Combine(dir, "Tekla.Structures.Model.dll"));
+        string catPath = Path.Combine(dir, "Tekla.Structures.Catalogs.dll");
+        if (File.Exists(catPath)) cat = Assembly.LoadFrom(catPath);
 
         int ok = 0; var bad = new List<string>();
         foreach (string line in File.ReadAllLines(a[0]))

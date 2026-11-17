@@ -1,15 +1,20 @@
-// Hộp thoại WinForms thuần (không dính Tekla.Structures.Dialog) -> đưa vào Cover Tool như một Form bình thường.
+// Hộp thoại WinForms thuần (không dính Tekla) -> đưa vào Cover Tool như một Form bình thường.
+// Luồng: pick đa giác trong Tekla -> HÌNH THẬT hiện ở đây để chỉnh (thông số, toạ độ điểm) -> nút "Tạo khung trong Tekla".
 // Mọi ô nhập gắn với field của MeshFrameSettings bằng reflection: thêm field mới chỉ cần thêm 1 dòng Row(...).
 using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
 using System.Reflection;
+using System.Text;
 using System.Windows.Forms;
 using MeshFrame.Core;
 
 namespace MeshFrame.UI
 {
+    public class CreateOutcome { public bool Success; public string Message; }
+    public class LoadedFrame { public MeshFrameSettings Settings; public V3[] Points; public string Id; public string Error; }
+
     public class MeshFrameDialog : Form
     {
         private readonly MeshFrameSettings _s = new MeshFrameSettings();
@@ -18,14 +23,46 @@ namespace MeshFrame.UI
         private readonly Dictionary<string, Label> _labels = new Dictionary<string, Label>();
 
         private readonly PreviewControl _preview = new PreviewControl { Dock = DockStyle.Fill };
-        private readonly TextBox _pvL = new TextBox { Text = "4000", Width = 70 };
-        private readonly TextBox _pvH = new TextBox { Text = "1200", Width = 70 };
-        private readonly TextBox _pvSkew = new TextBox { Text = "0", Width = 70 };
-        private readonly Label _info = new Label { Dock = DockStyle.Bottom, Height = 96, Padding = new Padding(6) };
+        private readonly Label _header = new Label { Dock = DockStyle.Top, Height = 28, Padding = new Padding(6, 6, 0, 0), Font = new Font("Segoe UI", 9.5F, FontStyle.Bold) };
+        private readonly RichTextBox _status = new RichTextBox { Dock = DockStyle.Bottom, Height = 150, ReadOnly = true, BorderStyle = BorderStyle.FixedSingle, BackColor = Color.White };
+        private readonly DataGridView _grid = new DataGridView();
+        private Button _btnCreate, _btnRepick, _btnEdit, _btnDeletePoint;
         private bool _loading;
+        private V3[] _points = new V3[0];
+        private string _editingId;
+        private string[][] _rebarCatalog;
 
-        /// <summary>Hàm đọc đối tượng đang chọn trong Tekla (app gắn vào); trả về thông báo hiển thị cho người dùng.</summary>
+        // ---------------------------------------------------------------- API cho app chủ (Tekla / Cover Tool)
+        /// <summary>Pick lại đa giác trong Tekla: trả về các điểm mới (GLOBAL) hoặc null nếu hủy.</summary>
+        public Func<V3[]> PickHandler { get; set; }
+        /// <summary>Tạo khung trong Tekla với thông số + điểm hiện tại (hoặc thay khung đang sửa).</summary>
+        public Func<MeshFrameSettings, V3[], CreateOutcome> CreateHandler { get; set; }
+        /// <summary>Đọc khung đang chọn trong Tekla để sửa.</summary>
+        public Func<LoadedFrame> EditHandler { get; set; }
+        /// <summary>Đọc đối tượng đang chọn trong Tekla (lưới mẫu): trả về thông báo hiển thị.</summary>
         public Func<string> SelectedObjectProbe { get; set; }
+
+        /// <summary>Các điểm pick (toạ độ GLOBAL). Gán để hiện hình thật trong app.</summary>
+        public V3[] Points
+        {
+            get { return _points; }
+            set { _points = value ?? new V3[0]; RefreshGrid(); Changed(); }
+        }
+
+        /// <summary>Mã khung đang sửa (null = tạo khung mới).</summary>
+        public string EditingId
+        {
+            get { return _editingId; }
+            set { _editingId = value; UpdateButtons(); Changed(); }
+        }
+
+        /// <summary>Danh sách (mác, cỡ sợi) trong catalog rebar của Tekla -> ô chọn mác / cỡ sợi của lưới.</summary>
+        public void SetRebarCatalog(IList<string[]> items)
+        {
+            _rebarCatalog = new string[items.Count][];
+            for (int i = 0; i < items.Count; i++) _rebarCatalog[i] = items[i];
+            FillRebarCombos();
+        }
 
         /// <summary>Thông số hiện tại (đọc từ ô nhập / gán để nạp vào ô nhập).</summary>
         public MeshFrameSettings Settings
@@ -42,7 +79,7 @@ namespace MeshFrame.UI
         {
             Text = "MeshFrame - Khung lưới: V + lưới + nẹp + gia cường";
             Font = new Font("Segoe UI", 9F);
-            ClientSize = new Size(1100, 700);
+            ClientSize = new Size(1220, 780);
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -56,44 +93,41 @@ namespace MeshFrame.UI
             tabs.TabPages.Add(TabStrip());
             tabs.TabPages.Add(TabTekla());
 
+            // ---- bên phải: tiêu đề, hình, bảng điểm, trạng thái
             var right = new Panel { Dock = DockStyle.Fill };
-            var top = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40, Padding = new Padding(6, 8, 0, 0) };
-            top.Controls.AddRange(new Control[]
-            {
-                new Label { Text = "Xem trước:  Dài L", AutoSize = true, Margin = new Padding(3, 5, 3, 0) }, _pvL,
-                new Label { Text = "Cao H", AutoSize = true, Margin = new Padding(12, 5, 3, 0) }, _pvH,
-                new Label { Text = "Lệch cạnh trên", AutoSize = true, Margin = new Padding(12, 5, 3, 0) }, _pvSkew
-            });
+            var gridPanel = new Panel { Dock = DockStyle.Bottom, Height = 150 };
+            BuildGrid(gridPanel);
             right.Controls.Add(_preview);
-            right.Controls.Add(top);
-            right.Controls.Add(_info);
+            right.Controls.Add(_header);
+            right.Controls.Add(gridPanel);
+            right.Controls.Add(_status);
 
-            var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 46, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
-            var cancel = new Button { Text = "Hủy", Width = 90, Height = 28, DialogResult = DialogResult.Cancel };
-            var ok = new Button { Text = "OK", Width = 90, Height = 28 };
-            ok.Click += delegate
-            {
-                Read();
-                var errs = _s.Validate();
-                if (errs.Count > 0) { MessageBox.Show(string.Join("\n", errs.ToArray()), "Thông số chưa hợp lệ"); return; }
-                DialogResult = DialogResult.OK;
-            };
-            buttons.Controls.AddRange(new Control[] { cancel, ok });
-            AcceptButton = ok; CancelButton = cancel;
+            // ---- nút
+            var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 48, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
+            var close = new Button { Text = "Đóng", Width = 90, Height = 30, DialogResult = DialogResult.Cancel };
+            _btnCreate = new Button { Text = "Tạo khung trong Tekla", Width = 190, Height = 30, Font = new Font("Segoe UI", 9F, FontStyle.Bold) };
+            _btnEdit = new Button { Text = "Sửa khung đã chọn", Width = 150, Height = 30 };
+            _btnRepick = new Button { Text = "Pick lại điểm", Width = 120, Height = 30 };
+            _btnCreate.Click += delegate { DoCreate(); };
+            _btnEdit.Click += delegate { DoEdit(); };
+            _btnRepick.Click += delegate { DoRepick(); };
+            buttons.Controls.AddRange(new Control[] { close, _btnCreate, _btnEdit, _btnRepick });
+            CancelButton = close;
 
             Controls.Add(right);
             Controls.Add(tabs);
             Controls.Add(buttons);
 
-            foreach (TextBox t in new[] { _pvL, _pvH, _pvSkew }) t.TextChanged += delegate { Changed(); };
             PushToControls();
+            RefreshGrid();
+            UpdateButtons();
         }
 
         // ------------------------------------------------------------ các tab
         private TabPage TabFrame()
         {
             var t = NewPage("Khung V");
-            Note(t, "Khung = 4 thanh thép góc quanh 4 điểm pick; mép ngoài khung đi qua các điểm pick.");
+            Note(t, "Mỗi cạnh của đa giác pick là một thanh thép góc; mép ngoài khung đi qua các điểm pick.");
             Row(t, "VLegA", "Cạnh V - a (mm)");
             Row(t, "VLegB", "Cạnh V - b (mm)");
             Row(t, "VThk", "Độ dày V (mm)");
@@ -104,19 +138,19 @@ namespace MeshFrame.UI
             Row(t, "VStartNo", "Số bắt đầu part");
             Row(t, "AsmPrefix", "Prefix assembly");
             Row(t, "AsmStartNo", "Số bắt đầu assembly");
-            Row(t, "Corner", "Ghép góc", "Cắt vát theo phân giác góc", "Một cạnh chạy suốt, cạnh kia cắt vuông");
+            Row(t, "Corner", "Ghép góc", "Cắt vát theo phân giác góc", "Một cạnh chạy suốt (chỉ khi 4 điểm)");
             return (TabPage)t.Parent;
         }
 
         private TabPage TabStiff()
         {
             var t = NewPage("Gia cường");
-            Note(t, "V gia cường CÙNG TIẾT DIỆN V khung, luôn vuông góc với đố trên/dưới (cạnh gốc), hai đầu cắt khuyết cánh nằm cho khớp V khung. Các ô đo dọc cạnh gốc. Lưới kéo căng liên tục; nẹp PL đi theo từng thanh.");
+            Note(t, "V gia cường CÙNG TIẾT DIỆN V khung, vuông góc với CẠNH GỐC, hai đầu cắt khuyết cánh nằm cho khớp V khung. Các ô đo dọc cạnh gốc. Lưới kéo căng liên tục; nẹp PL đi theo từng thanh.");
             Row(t, "StiffMode", "Chia ô", "Không gia cường", "Chia đều (mỗi ô tối đa)", "Nhập từng ô");
-            Row(t, "StiffDir", "Chia theo", "Dọc cạnh P1-P2 (thanh đứng)", "Dọc cạnh P1-P4 (thanh ngang)");
+            Row(t, "StiffBaseEdge", "Cạnh gốc (0 = tự chọn cạnh dài nhất)");
             Row(t, "StiffMax", "Mỗi ô tối đa (mm)");
             Row(t, "StiffCells", "Bề rộng từng ô (mm)");
-            Note(t, "Nhập từng ô: cách nhau bằng dấu cách, vd  1000 2*1500 800  (n*x = lặp n lần). Tổng nhỏ hơn khung thì tự thêm ô cuối.");
+            Note(t, "Nhập từng ô: cách nhau bằng dấu cách, vd  1000 2*1500 800  (n*x = lặp n lần). Tổng nhỏ hơn khung thì tự thêm ô cuối. Số cạnh xem ở hình bên phải (\"1: 3000\" = cạnh 1 dài 3000).");
             Row(t, "SMaterial", "Vật liệu");
             Row(t, "SName", "Tên");
             Row(t, "SClass", "Class");
@@ -128,13 +162,15 @@ namespace MeshFrame.UI
         private TabPage TabMesh()
         {
             var t = NewPage("Lưới");
-            Note(t, "Lưới nằm phía ngoài cánh nằm V, nẹp ép ngoài lưới. Tấm mỏng luôn tạo được (khối lượng nhập tay bên dưới); RebarMesh cần Tekla chấp nhận đủ thuộc tính.");
-            Row(t, "MeshKind", "Kiểu lưới", "Tấm mỏng (plate)", "RebarMesh", "Không tạo lưới");
+            Note(t, "Lưới nằm phía ngoài cánh nằm V, nẹp ép ngoài lưới. RebarMesh cần mác và cỡ sợi CÓ trong catalog rebar của Tekla; Tekla từ chối thì tự thay bằng tấm mỏng.");
+            Row(t, "MeshKind", "Kiểu lưới", "RebarMesh (tự chuyển sang tấm nếu lỗi)", "Tấm mỏng (plate)", "Không tạo lưới");   // đúng thứ tự enum MeshKind
             Row(t, "MeshGap", "Lưới lùi cách mép ngoài khung (mm)");
             Row(t, "MeshWireDia", "Đường kính sợi (mm)");
             Row(t, "MeshPitch", "Bước sợi = ô + sợi (mm)");
+            Row(t, "RebarGrade", "Mác rebar (trống = mác bên dưới)", true);
+            Row(t, "RebarSize", "Cỡ sợi rebar (trống = đường kính sợi)", true);
             Row(t, "MeshName", "Tên");
-            Row(t, "MeshGrade", "Mác thép (Grade)");
+            Row(t, "MeshGrade", "Mác thép / vật liệu tấm");
             Row(t, "MeshPrefix", "Prefix (numbering series)");
             Row(t, "MeshStartNo", "Số bắt đầu");
             Row(t, "MeshClass", "Class");
@@ -145,9 +181,9 @@ namespace MeshFrame.UI
 
         private TabPage TabStrip()
         {
-            var t = NewPage("Nẹp && liên kết");
+            var t = NewPage("Nẹp");
             Row(t, "UseStrip", "Có nẹp");
-            Note(t, "Nẹp PL nằm phía ngoài, ép lưới vào cánh nằm V (chuẩn PL-25x1.2, rộng bằng cánh V); chạy quanh khung và theo các thanh gia cường. Bỏ tick: khóa nẹp và liên kết.");
+            Note(t, "Nẹp PL nằm phía ngoài, ép lưới vào cánh nằm V (chuẩn PL-25x1.2, rộng bằng cánh V); chạy quanh khung và theo các thanh gia cường.");
             Row(t, "StripWidth", "Bề rộng nẹp (mm)");
             Row(t, "StripThk", "Độ dày nẹp (mm)");
             Row(t, "StripMaterial", "Vật liệu");
@@ -155,10 +191,6 @@ namespace MeshFrame.UI
             Row(t, "StripClass", "Class");
             Row(t, "StripPrefix", "Prefix part");
             Row(t, "StripStartNo", "Số bắt đầu part");
-            Row(t, "Fasten", "Liên kết", "Không", "Vít / bu lông", "Hàn điểm");
-            Row(t, "FastenDia", "Đường kính vít (mm)");
-            Row(t, "FastenPitch", "Bước @ tối đa (mm)");
-            Row(t, "FastenEdge", "Cách đầu thanh (mm)");
             return (TabPage)t.Parent;
         }
 
@@ -168,7 +200,6 @@ namespace MeshFrame.UI
             Note(t, "Chỉnh khi kết quả trong Tekla lệch. Mặc định đặt theo tim (On plane / At depth = Middle) để V và nẹp trùng tim. Dùng chữ KHÔNG DẤU cho các ô gửi sang Tekla.");
             Row(t, "VProfile", "Profile V khung + gia cường (trống = tự tạo)");
             Row(t, "StripProfile", "Profile nẹp (trống = tự tạo FL w*t)");
-            Row(t, "BoltStandard", "Bolt standard (vít)");
             Note(t, "Hướng đặt thép góc V khung (V gia cường dùng chung):");
             Row(t, "VPlane", "  On plane", "Left", "Middle", "Right");
             Row(t, "VRotation", "  Rotation", "Front", "Top", "Back", "Below");
@@ -180,7 +211,6 @@ namespace MeshFrame.UI
             Row(t, "VLateral", "Lệch ngang V (mm, + vào trong khung)");
             Row(t, "StripLateral", "Lệch ngang nẹp (mm, + vào trong khung)");
             Row(t, "FlipMiterCut", "Đảo phía cắt vát (nếu mặt cắt vát ra ngược)");
-            Row(t, "FlipBolt", "Đảo chiều vít (nếu vít ra ngược)");
             var probe = new Button { Text = "Đọc lưới mẫu đang chọn trong Tekla", AutoSize = true, Margin = new Padding(3, 10, 3, 3) };
             probe.Click += delegate
             {
@@ -196,6 +226,110 @@ namespace MeshFrame.UI
             return (TabPage)t.Parent;
         }
 
+        // ------------------------------------------------------------ bảng điểm
+        private void BuildGrid(Panel host)
+        {
+            _grid.Dock = DockStyle.Fill;
+            _grid.AllowUserToAddRows = false;
+            _grid.AllowUserToDeleteRows = false;
+            _grid.RowHeadersVisible = false;
+            _grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            _grid.MultiSelect = false;
+            _grid.BackgroundColor = Color.White;
+            _grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            _grid.Columns.Add("pt", "Điểm"); _grid.Columns[0].ReadOnly = true; _grid.Columns[0].Width = 60;
+            _grid.Columns.Add("x", "X (mm)"); _grid.Columns.Add("y", "Y (mm)"); _grid.Columns.Add("z", "Z (mm)");
+            foreach (int i in new[] { 1, 2, 3 }) _grid.Columns[i].Width = 120;
+            _grid.Columns.Add("len", "Dài tới điểm kế (mm)"); _grid.Columns[4].ReadOnly = true; _grid.Columns[4].Width = 150;
+            _grid.CellEndEdit += delegate (object s, DataGridViewCellEventArgs e) { GridEdited(e.RowIndex, e.ColumnIndex); };
+
+            _btnDeletePoint = new Button { Text = "Xóa điểm đã chọn", Dock = DockStyle.Right, Width = 130 };
+            _btnDeletePoint.Click += delegate
+            {
+                if (_grid.CurrentRow == null || _points.Length <= 3) return;
+                int idx = _grid.CurrentRow.Index;
+                var list = new List<V3>(_points); list.RemoveAt(idx);
+                _points = list.ToArray(); RefreshGrid(); Changed();
+            };
+            var title = new Label { Text = "Các điểm pick (sửa được tọa độ; tự nối điểm cuối về điểm đầu)", Dock = DockStyle.Top, Height = 20, ForeColor = Color.DimGray, Padding = new Padding(4, 3, 0, 0) };
+            host.Controls.Add(_grid);
+            host.Controls.Add(_btnDeletePoint);
+            host.Controls.Add(title);
+        }
+
+        private void RefreshGrid()
+        {
+            _loading = true;
+            _grid.Rows.Clear();
+            for (int i = 0; i < _points.Length; i++)
+            {
+                V3 p = _points[i], q = _points[(i + 1) % _points.Length];
+                _grid.Rows.Add("P" + (i + 1), F(p.X), F(p.Y), F(p.Z), F((q - p).Length));
+            }
+            _loading = false;
+        }
+
+        private void GridEdited(int row, int col)
+        {
+            if (_loading || row < 0 || col < 1 || col > 3) return;
+            double v;
+            if (!double.TryParse(Convert.ToString(_grid.Rows[row].Cells[col].Value).Trim().Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out v))
+            { RefreshGrid(); return; }                                              // nhập sai: trả lại giá trị cũ
+            V3 p = _points[row];
+            _points[row] = new V3(col == 1 ? v : p.X, col == 2 ? v : p.Y, col == 3 ? v : p.Z);
+            RefreshGrid();
+            Changed();
+        }
+
+        // ------------------------------------------------------------ hành động
+        private void DoRepick()
+        {
+            if (PickHandler == null) { MessageBox.Show("Chỉ dùng khi chạy cùng Tekla.", "MeshFrame"); return; }
+            V3[] p = null;
+            Visible = false;                                                       // ẩn hộp thoại để pick trong Tekla
+            try { p = PickHandler(); }
+            catch (Exception ex) { Visible = true; MessageBox.Show("Lỗi khi pick: " + ex.Message, "MeshFrame", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
+            Visible = true; Activate();
+            if (p != null) { EditingId = null; Points = p; }
+        }
+
+        private void DoEdit()
+        {
+            if (EditHandler == null) { MessageBox.Show("Chỉ dùng khi chạy cùng Tekla.", "MeshFrame"); return; }
+            LoadedFrame lf;
+            try { lf = EditHandler(); }
+            catch (Exception ex) { MessageBox.Show("Lỗi khi đọc khung: " + ex.Message, "MeshFrame", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
+            if (lf == null || lf.Error != null) { MessageBox.Show(lf == null ? "Không đọc được khung." : lf.Error, "MeshFrame"); return; }
+            Settings = lf.Settings;
+            _points = lf.Points; RefreshGrid();
+            EditingId = lf.Id;
+        }
+
+        private void DoCreate()
+        {
+            if (CreateHandler == null) { MessageBox.Show("Chỉ dùng khi chạy cùng Tekla.", "MeshFrame"); return; }
+            Read();
+            MeshFramePlan plan = CurrentPlan();
+            if (plan == null || plan.Errors.Count > 0) { MessageBox.Show("Chưa tạo được: " + (plan == null ? "chưa có đủ điểm." : string.Join("\n", plan.Errors.ToArray())), "MeshFrame"); return; }
+            _btnCreate.Enabled = false; Cursor = Cursors.WaitCursor;
+            CreateOutcome o;
+            try { o = CreateHandler(_s, (V3[])_points.Clone()); }
+            catch (Exception ex) { o = new CreateOutcome { Success = false, Message = "Lỗi: " + ex.Message }; }
+            finally { Cursor = Cursors.Default; _btnCreate.Enabled = true; }
+            AppendResult(o);
+            if (o.Success) EditingId = null;                                       // xong: trở về chế độ tạo mới
+        }
+
+        private void AppendResult(CreateOutcome o)
+        {
+            _status.SelectionStart = _status.TextLength;
+            _status.SelectionColor = o.Success ? Color.DarkGreen : Color.Firebrick;
+            _status.AppendText((o.Success ? "✔ " : "✖ ") + o.Message + Environment.NewLine);
+            _status.SelectionColor = _status.ForeColor;
+            Changed(false);
+            if (!o.Success) MessageBox.Show(o.Message, "MeshFrame", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
         // ------------------------------------------------------------ đọc / ghi / bật tắt / xem trước
         private void PushToControls()
         {
@@ -205,7 +339,7 @@ namespace MeshFrame.UI
                 object v = _fields[kv.Key].GetValue(_s);
                 var cb = kv.Value as CheckBox; var combo = kv.Value as ComboBox;
                 if (cb != null) cb.Checked = (bool)v;
-                else if (combo != null) combo.SelectedIndex = Convert.ToInt32(v);
+                else if (combo != null && _fields[kv.Key].FieldType.IsEnum) combo.SelectedIndex = Convert.ToInt32(v);
                 else kv.Value.Text = Convert.ToString(v, CultureInfo.InvariantCulture);
             }
             _loading = false;
@@ -220,7 +354,7 @@ namespace MeshFrame.UI
                 var cb = kv.Value as CheckBox; var combo = kv.Value as ComboBox;
                 object val = null; bool ok = true;
                 if (cb != null) val = cb.Checked;
-                else if (combo != null) val = Enum.ToObject(f.FieldType, combo.SelectedIndex);
+                else if (combo != null && f.FieldType.IsEnum) val = Enum.ToObject(f.FieldType, combo.SelectedIndex);
                 else if (f.FieldType == typeof(string)) val = kv.Value.Text;
                 else if (f.FieldType == typeof(double))
                 {
@@ -235,26 +369,28 @@ namespace MeshFrame.UI
             }
         }
 
-        private void Changed()
+        private void Changed() { Changed(true); }
+
+        private void Changed(bool resetStatus)
         {
             if (_loading) return;
             Read();
             UpdateEnabled();
             UpdatePreview();
+            UpdateButtons();
         }
 
         private void UpdateEnabled()
         {
             bool strip = _s.UseStrip;
-            foreach (string n in new[] { "StripWidth", "StripThk", "StripMaterial", "StripName", "StripClass", "StripPrefix", "StripStartNo", "Fasten" })
-                Enable(n, strip);
-            bool fasten = strip && _s.Fasten != FastenKind.None;
-            foreach (string n in new[] { "FastenDia", "FastenPitch", "FastenEdge" }) Enable(n, fasten);
-
+            foreach (string n in new[] { "StripWidth", "StripThk", "StripMaterial", "StripName", "StripClass", "StripPrefix", "StripStartNo" }) Enable(n, strip);
             bool stiff = _s.StiffMode != StiffMode.None;
-            foreach (string n in new[] { "StiffDir", "SMaterial", "SName", "SClass", "SPrefix", "SStartNo" }) Enable(n, stiff);
+            foreach (string n in new[] { "StiffBaseEdge", "SMaterial", "SName", "SClass", "SPrefix", "SStartNo" }) Enable(n, stiff);
             Enable("StiffMax", _s.StiffMode == StiffMode.Equal);
             Enable("StiffCells", _s.StiffMode == StiffMode.Custom);
+            bool mesh = _s.MeshKind != MeshKind.None;
+            foreach (string n in new[] { "MeshGap", "MeshWireDia", "MeshPitch", "MeshName", "MeshGrade", "MeshPrefix", "MeshStartNo", "MeshClass", "MeshWeightKgPerM2" }) Enable(n, mesh);
+            Enable("RebarGrade", _s.MeshKind == MeshKind.RebarMesh); Enable("RebarSize", _s.MeshKind == MeshKind.RebarMesh);
         }
 
         private void Enable(string name, bool on)
@@ -263,36 +399,91 @@ namespace MeshFrame.UI
             if (_labels.ContainsKey(name)) _labels[name].Enabled = on;
         }
 
+        private void UpdateButtons()
+        {
+            if (_btnCreate == null) return;
+            bool editing = _editingId != null;
+            _btnCreate.Text = editing ? "Cập nhật khung trong Tekla (thay khung cũ)" : "Tạo khung trong Tekla";
+            _btnCreate.Width = editing ? 300 : 190;
+            MeshFramePlan plan = CurrentPlan();
+            _btnCreate.Enabled = plan != null && plan.Errors.Count == 0 && CreateHandler != null;
+            _btnDeletePoint.Enabled = _points.Length > 3;
+        }
+
+        /// <summary>Kế hoạch từ các điểm + thông số hiện tại (null nếu chưa đủ 3 điểm hoặc điểm không cùng mặt phẳng).</summary>
+        private MeshFramePlan CurrentPlan()
+        {
+            Frame f; V2[] poly; string err;
+            if (_points.Length < 3 || !MeshFrameBuilder.TryFrame(_points, out f, out poly, out err)) return null;
+            return MeshFramePlanner.Plan(_s, poly);
+        }
+
         private void UpdatePreview()
         {
-            double L, H, skew;
-            if (!Num(_pvL, out L) || !Num(_pvH, out H) || !Num(_pvSkew, out skew) || L <= 0 || H <= 0) { _info.Text = "Nhập L, H xem trước hợp lệ."; return; }
-            var poly = new[] { new V2(0, 0), new V2(L, 0), new V2(L + skew, H), new V2(skew, H) };
+            Frame f; V2[] poly; string err = null;
+            bool framed = _points.Length >= 3 && MeshFrameBuilder.TryFrame(_points, out f, out poly, out err);
+            if (_points.Length < 3)
+            {
+                _preview.ShowEmpty(null);
+                _header.Text = _points.Length == 0 ? "Chưa có điểm" : "Mới có " + _points.Length + " điểm, cần ít nhất 3";
+                SetStatus(new List<string>(), new List<string> { "Chưa đủ điểm: bấm \"Pick lại điểm\" để pick đa giác trong Tekla." }, new List<string>(), null);
+                return;
+            }
+            if (!framed)
+            {
+                _preview.ShowEmpty("Không dựng được khung: " + err);
+                _header.Text = _points.Length + " điểm";
+                SetStatus(new List<string> { err }, new List<string>(), new List<string>(), null);
+                return;
+            }
+            MeshFrameBuilder.TryFrame(_points, out f, out poly, out err);
             MeshFramePlan plan = MeshFramePlanner.Plan(_s, poly);
             _preview.Show(plan.Errors.Count == 0 ? plan : null, poly, _s.VLegA);
 
-            var sb = new System.Text.StringBuilder();
-            if (plan.Errors.Count > 0) { _info.ForeColor = Color.Firebrick; foreach (string e in plan.Errors) sb.AppendLine("✖ " + e); }
-            else
-            {
-                _info.ForeColor = SystemColors.ControlText;
-                int stiff = 0; foreach (PlanBar b in plan.Bars) if (b.Role == BarRole.Stiffener) stiff++;
-                sb.AppendLine(string.Format("V khung 4 · gia cường {0} · nẹp {1} · vít {2} · ô {3}", stiff, plan.Strips.Count, plan.Fasteners.Count, Math.Max(1, plan.Cells.Count)));
-                if (plan.Cells.Count > 1)
-                {
-                    var parts = new List<string>(); foreach (double c in plan.Cells) parts.Add(c.ToString("0.#", CultureInfo.InvariantCulture));
-                    sb.AppendLine("Bề rộng các ô: " + string.Join(" · ", parts.ToArray()));
-                }
-                sb.AppendLine(plan.Mesh == null ? "Không tạo lưới" : string.Format("Lưới ({0}): 2 lớp sợi {1:0.##} mm, dưới cánh V (phía ngoài), nẹp ngoài lưới", plan.Mesh.Kind, plan.Mesh.WireDia));
-                foreach (string w in plan.Warnings) sb.AppendLine("⚠ " + w);
-            }
-            _info.Text = sb.ToString();
+            double per = 0; for (int i = 0; i < _points.Length; i++) per += (_points[(i + 1) % _points.Length] - _points[i]).Length;
+            double area = plan.Polygon != null ? Math.Abs(Geo.Area(plan.Polygon)) / 1e6 : 0;
+            _header.Text = _points.Length + " điểm · chu vi " + F(per) + " mm · diện tích " + area.ToString("0.###", CultureInfo.InvariantCulture) + " m²"
+                           + (_editingId != null ? "   —   ĐANG SỬA KHUNG " + _editingId.Substring(0, Math.Min(8, _editingId.Length)) : "");
+
+            int stiff = 0; foreach (PlanBar b in plan.Bars) if (b.Role == BarRole.Stiffener) stiff++;
+            string summary = plan.Errors.Count > 0 ? null :
+                string.Format("Sẽ tạo: {0} V khung · {1} gia cường · {2} nẹp · lưới {3} · {4} ô", plan.Bars.Count - stiff, stiff, plan.Strips.Count,
+                              plan.Mesh == null ? "không" : plan.Mesh.Kind == MeshKind.RebarMesh ? "RebarMesh" : "tấm mỏng", Math.Max(1, plan.Cells.Count));
+            SetStatus(plan.Errors, plan.Warnings, plan.Notes, summary);
         }
 
-        private static bool Num(TextBox t, out double d)
+        private void SetStatus(List<string> errors, List<string> warnings, List<string> notes, string summary)
         {
-            return double.TryParse(t.Text.Trim().Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out d);
+            // Giữ lại các dòng KẾT QUẢ tạo khung đã ghi; chỉ thay phần "xem trước" ở đầu.
+            _status.Clear();
+            if (summary != null) Line(summary, Color.Black, true);
+            foreach (string e in errors) Line("✖ " + e, Color.Firebrick, true);
+            foreach (string n in notes) Line("ℹ " + n, Color.DimGray, false);
+            foreach (string w in warnings) Line("⚠ " + w, Color.DarkOrange, false);
+            if (errors.Count > 0) Line("→ Chưa thể tạo khung: sửa các lỗi trên (nút Tạo khung đang khóa).", Color.Firebrick, true);
         }
+
+        private void Line(string text, Color c, bool bold)
+        {
+            _status.SelectionStart = _status.TextLength;
+            _status.SelectionColor = c;
+            _status.SelectionFont = new Font(_status.Font, bold ? FontStyle.Bold : FontStyle.Regular);
+            _status.AppendText(text + Environment.NewLine);
+        }
+
+        private void FillRebarCombos()
+        {
+            if (_rebarCatalog == null) return;
+            var grades = new List<string>(); var sizes = new List<string>();
+            foreach (string[] it in _rebarCatalog) { if (!grades.Contains(it[0])) grades.Add(it[0]); if (!sizes.Contains(it[1])) sizes.Add(it[1]); }
+            var cg = _ctl["RebarGrade"] as ComboBox; var cs = _ctl["RebarSize"] as ComboBox;
+            string g0 = cg.Text, s0 = cs.Text;
+            cg.Items.Clear(); cg.Items.AddRange(grades.ToArray());
+            cs.Items.Clear(); cs.Items.AddRange(sizes.ToArray());
+            cg.Text = g0; cs.Text = s0;
+        }
+
+        private static string F(double d) { return d.ToString("0.##", CultureInfo.InvariantCulture); }
 
         // ------------------------------------------------------------ dựng ô nhập
         private static TableLayoutPanel NewPage(string title)
@@ -315,7 +506,10 @@ namespace MeshFrame.UI
         }
 
         /// <summary>Thêm 1 ô nhập gắn với field cùng tên của MeshFrameSettings. captions: tên các lựa chọn nếu field là enum.</summary>
-        private void Row(TableLayoutPanel t, string field, string caption, params string[] captions)
+        private void Row(TableLayoutPanel t, string field, string caption, params string[] captions) { RowCore(t, field, caption, false, captions); }
+        private void Row(TableLayoutPanel t, string field, string caption, bool editableCombo) { RowCore(t, field, caption, editableCombo); }
+
+        private void RowCore(TableLayoutPanel t, string field, string caption, bool editableCombo, params string[] captions)
         {
             FieldInfo f = _fields[field];
             Control c;
@@ -339,13 +533,19 @@ namespace MeshFrame.UI
                     combo.SelectedIndexChanged += delegate { Changed(); };
                     c = combo;
                 }
+                else if (editableCombo)
+                {
+                    var combo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDown, Width = 205 };
+                    combo.TextChanged += delegate { Changed(); };
+                    c = combo;
+                }
                 else
                 {
                     var tb = new TextBox { Width = 205 };
                     tb.TextChanged += delegate { Changed(); };
                     c = tb;
                 }
-                var lbl = new Label { Text = caption, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 8, 3, 3) };
+                var lbl = new Label { Text = caption, AutoSize = true, MaximumSize = new Size(205, 0), Anchor = AnchorStyles.Left, Margin = new Padding(3, 8, 3, 3) };
                 _labels[field] = lbl;
                 t.Controls.Add(lbl, 0, row);
                 t.Controls.Add(c, 1, row);

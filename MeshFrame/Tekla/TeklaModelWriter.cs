@@ -2,7 +2,8 @@
 // Mọi thành viên Tekla được dùng đều bị test hợp đồng (Tests/) đối chiếu với DLL thật khi chạy ci/build.sh.
 //
 // Độ bền: lỗi nặng (thanh V / nẹp không tạo được) -> xóa mọi thứ đã tạo rồi ném lỗi (không để model dở dang).
-//         lỗi nhẹ (lưới, vít, gộp assembly) -> ghi cảnh báo vào Messages và vẫn hoàn tất phần còn lại.
+//         lỗi nhẹ (lưới, gộp assembly) -> ghi cảnh báo vào Messages và vẫn hoàn tất phần còn lại.
+//         RebarMesh bị Tekla từ chối -> thử dạng chữ nhật (nếu khung chữ nhật) -> cuối cùng thay bằng lưới dạng tấm mỏng.
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -18,6 +19,12 @@ namespace MeshFrame.Tekla
         private readonly List<object> _created = new List<object>();
         public readonly List<string> Messages = new List<string>();
 
+        /// <summary>Mã khung: nếu có thì ghi vào UDA của part chính để "Sửa khung đã chọn" tìm lại được.</summary>
+        public string FrameId;
+
+        /// <summary>Part chính (V khung đầu tiên) của khung vừa tạo; null nếu chưa tạo.</summary>
+        public object MainPart { get; private set; }
+
         /// <param name="model">Đối tượng Tekla.Structures.Model.Model đã có (Cover Tool: model của gateway); null = tạo mới.</param>
         public TeklaModelWriter(TeklaApi api, object model)
         {
@@ -29,6 +36,7 @@ namespace MeshFrame.Tekla
         {
             P = plan.Placement;
             _created.Clear();
+            MainPart = null;
             object wph = A.Call(_model, "GetWorkPlaneHandler");
             object old = A.Call(wph, "GetCurrentTransformationPlane");
             try
@@ -51,18 +59,13 @@ namespace MeshFrame.Tekla
                     throw;
                 }
                 if (bars.Count == 0) return;
+                MainPart = bars[0];
 
                 object meshPart = null;
                 if (plan.Mesh != null)
                 {
-                    try { meshPart = InsertMesh(plan.Mesh, bars[0]); }
-                    catch (Exception ex) { Messages.Add("Lưới (" + plan.Mesh.Kind + ") không tạo được: " + Root(ex).Message + ". Các phần khác vẫn được tạo."); }
-                }
-
-                if (plan.Fasteners.Count > 0)
-                {
-                    try { InsertFasteners(plan, strips, bars[0]); }
-                    catch (Exception ex) { Messages.Add("Vít không tạo được: " + Root(ex).Message + ". Các phần khác vẫn được tạo."); }
+                    try { meshPart = InsertMesh(plan.Mesh, bars[0], plan.Polygon); }
+                    catch (Exception ex) { Messages.Add("Lưới không tạo được: " + Root(ex).Message + ". Các phần khác vẫn được tạo."); }
                 }
 
                 // Gộp thành 1 assembly, main = V khung đầu tiên
@@ -78,6 +81,12 @@ namespace MeshFrame.Tekla
                     A.Call(asm, "Modify");
                 }
                 catch (Exception ex) { Messages.Add("Chưa gộp được assembly: " + Root(ex).Message); }
+
+                if (!string.IsNullOrEmpty(FrameId))
+                {
+                    try { TeklaFrameStore.WriteId(A, bars[0], FrameId); }
+                    catch (Exception ex) { Messages.Add("Không gắn được mã khung (không thể 'Sửa khung đã chọn' sau này): " + Root(ex).Message); }
+                }
             }
             finally
             {
@@ -186,9 +195,28 @@ namespace MeshFrame.Tekla
         }
 
         // ------------------------------------------------------------------ lưới
-        private object InsertMesh(PlanMesh m, object father)
+        /// <summary>Tạo lưới theo PlanMesh.Kind. Trả về part (lưới dạng tấm) để đưa vào assembly, hoặc null (RebarMesh / không có).</summary>
+        private object InsertMesh(PlanMesh m, object father, V2[] frame)
         {
-            return m.Kind == MeshKind.RebarMesh ? InsertRebarMesh(m, father) : InsertMeshPlate(m);
+            if (m.Kind == MeshKind.Plate) return InsertMeshPlate(m);
+
+            string why = null;
+            // 1) mác thép + cỡ sợi phải có trong catalog rebar (nếu đọc được catalog)
+            why = TeklaCatalog.Check(A, m.RebarGrade, m.RebarSize);
+            if (why == null)
+            {
+                // 2) đa giác với đủ thuộc tính theo ví dụ chính thức
+                try { InsertRebarMesh(m, father, true); return null; }
+                catch (Exception ex) { why = "đa giác: " + Root(ex).Message; }
+                // 3) khung chữ nhật -> thử RECTANGULAR_MESH
+                if (m.IsRectangle)
+                {
+                    try { InsertRebarMesh(m, father, false); Messages.Add("RebarMesh dạng đa giác bị Tekla từ chối (" + why + "); đã tạo dạng chữ nhật."); return null; }
+                    catch (Exception ex2) { why += " | chữ nhật: " + Root(ex2).Message; }
+                }
+            }
+            Messages.Add("RebarMesh không tạo được: " + why + " -> đã thay bằng lưới dạng tấm mỏng.");
+            return InsertMeshPlate(m);
         }
 
         /// <summary>Lưới dạng tấm mỏng (ContourPlate dày = 2 lớp sợi) nằm dưới cánh nằm V, phía ngoài. Khối lượng: nhập tay.</summary>
@@ -210,63 +238,57 @@ namespace MeshFrame.Tekla
             return cp;
         }
 
-        private object InsertRebarMesh(PlanMesh m, object father)
+        /// <summary>RebarMesh với ĐỦ thuộc tính như ví dụ chính thức của Tekla (trang RebarMesh Class). Các thuộc tính kiểu liệt kê
+        /// mặc định là UNDEFINED (MeshType, LongitudinalSpacingMethod, CrossBarLocation) nên bắt buộc phải đặt.</summary>
+        private void InsertRebarMesh(PlanMesh m, object father, bool polygonType)
         {
             double zc = m.ZBottom + m.Thickness / 2;
-            object poly = A.New(A.ModelType("Polygon"));
-            IList pts = (IList)A.Get(poly, "Points");
-            foreach (V2 v in m.Polygon) pts.Add(A.Point(v.X, v.Y, zc));
+            V2 a = m.Polygon[0], b = m.Polygon[1];
+            V2 u = (b - a).Unit(), v = u.Left();
+            double u0 = double.MaxValue, u1 = double.MinValue, v0 = double.MaxValue, v1 = double.MinValue;
+            foreach (V2 p in m.Polygon)
+            {
+                double cu = (p - a).Dot(u), cv = (p - a).Dot(v);
+                u0 = Math.Min(u0, cu); u1 = Math.Max(u1, cu); v0 = Math.Min(v0, cv); v1 = Math.Max(v1, cv);
+            }
 
             object mesh = A.New(A.ModelType("RebarMesh"));
+            A.Set(mesh, "MeshType", A.Enum("RebarMesh+RebarMeshTypeEnum", polygonType ? "POLYGON_MESH" : "RECTANGULAR_MESH"));
             A.Set(mesh, "Father", father);
-            A.Set(mesh, "Polygon", poly);
-            A.Set(mesh, "MeshType", A.Enum("RebarMesh+RebarMeshTypeEnum", "POLYGON_MESH"));
+            if (polygonType)
+            {
+                object poly = A.New(A.ModelType("Polygon"));
+                IList pts = (IList)A.Get(poly, "Points");
+                foreach (V2 p in m.Polygon) pts.Add(A.Point(p.X, p.Y, zc));
+                A.Set(mesh, "Polygon", poly);
+            }
+            A.Set(mesh, "StartPoint", A.Point(a.X, a.Y, zc));
+            A.Set(mesh, "EndPoint", A.Point(b.X, b.Y, zc));
+            A.Set(mesh, "CatalogName", "MeshFrame");
+            A.Set(mesh, "LongitudinalSize", m.RebarSize);
+            A.Set(mesh, "CrossSize", m.RebarSize);
+            A.Set(mesh, "LeftOverhangCross", 0.0);
+            A.Set(mesh, "LeftOverhangLongitudinal", 0.0);
+            A.Set(mesh, "RightOverhangCross", 0.0);
+            A.Set(mesh, "RightOverhangLongitudinal", 0.0);
+            A.Set(mesh, "LongitudinalSpacingMethod", A.Enum("RebarMesh+RebarMeshSpacingMethodEnum", "SPACING_TYPE_SAME_DISTANCE"));
+            ((IList)A.Get(mesh, "LongitudinalDistances")).Add(m.Pitch);
+            ((IList)A.Get(mesh, "CrossDistances")).Add(m.Pitch);
             A.Set(mesh, "Name", m.Name);
-            A.Set(mesh, "Grade", m.Grade);
             A.Set(mesh, "Class", m.Class);
             object ns = A.Get(mesh, "NumberingSeries");
             A.Set(ns, "Prefix", m.Prefix);
             A.Set(ns, "StartNumber", m.StartNo);
-            string dia = Num(m.WireDia);
-            A.Set(mesh, "LongitudinalSize", dia);
-            A.Set(mesh, "CrossSize", dia);
-            A.Set(mesh, "LongitudinalDistances", new ArrayList { m.Pitch });
-            A.Set(mesh, "CrossDistances", new ArrayList { m.Pitch });
-            A.Set(mesh, "StartPoint", A.Point(m.Polygon[0].X, m.Polygon[0].Y, zc));
-            A.Set(mesh, "EndPoint", A.Point(m.Polygon[1].X, m.Polygon[1].Y, zc));
-            A.Require(mesh, "Insert", "RebarMesh đường kính " + dia + " mác " + m.Grade);
-            return null;                                                    // RebarMesh không phải part: không đưa vào assembly
-        }
-
-        // ------------------------------------------------------------------ vít / bu lông
-        private void InsertFasteners(MeshFramePlan plan, List<object> strips, object bar0)
-        {
-            for (int si = 0; si < plan.Strips.Count; si++)
-            {
-                List<PlanFastener> pts = plan.Fasteners.FindAll(x => x.StripIndex == si);
-                if (pts.Count == 0) continue;
-                if (pts[0].Kind != FastenKind.Screw) { Messages.Add("Hàn điểm: chưa ghi vào model (chỉ vít/bu lông)."); return; }
-
-                PlanFastener first = pts[0];
-                double step = pts.Count > 1 ? (pts[1].Pos - pts[0].Pos).Length : 0;
-                V2 dir = pts.Count > 1 ? (pts[1].Pos - pts[0].Pos).Unit() : new V2(1, 0);
-
-                object bolt = A.New(A.ModelType("BoltArray"));
-                A.Set(bolt, "PartToBeBolted", strips[si]);
-                A.Set(bolt, "PartToBoltTo", bar0);
-                double z0 = P.FlipBolt ? first.ZHead + first.Length : first.ZHead;   // mặc định đầu vít ở mặt ngoài nẹp
-                A.Set(bolt, "FirstPosition", A.Point(first.Pos.X, first.Pos.Y, z0));
-                A.Set(bolt, "SecondPosition", A.Point(first.Pos.X + dir.X, first.Pos.Y + dir.Y, z0));
-                A.Set(bolt, "BoltSize", first.Dia);
-                A.Set(bolt, "BoltStandard", P.BoltStandard);
-                A.Set(bolt, "Tolerance", 0.0);
-                A.Set(bolt, "BoltType", A.Enum("BoltGroup+BoltTypeEnum", "BOLT_TYPE_WORKSHOP"));
-                A.Set(bolt, "Length", first.Length);
-                for (int i = 1; i < pts.Count; i++) A.Call(bolt, "AddBoltDistX", step);
-                A.Call(bolt, "AddBoltDistY", 0.0);
-                object ok = A.Call(bolt, "Insert");
-                if (ok is bool && !(bool)ok) Messages.Add("Không tạo được vít trên nẹp " + (si + 1) + " (kiểm tra bolt standard '" + P.BoltStandard + "').");
-            }
+            A.Set(mesh, "Grade", m.RebarGrade);
+            ((IList)A.Get(mesh, "OnPlaneOffsets")).Add(0.0);
+            A.Set(mesh, "FromPlaneOffset", 0.0);
+            A.Set(mesh, "StartPointOffsetType", A.Enum("Reinforcement+RebarOffsetTypeEnum", "OFFSET_TYPE_COVER_THICKNESS"));
+            A.Set(mesh, "StartPointOffsetValue", 0.0);
+            A.Set(mesh, "CutByFatherPartCuts", false);
+            A.Set(mesh, "CrossBarLocation", A.Enum("RebarMesh+RebarMeshCrossBarLocationEnum", "LOCATION_TYPE_ABOVE"));
+            A.Set(mesh, "Length", v1 - v0);
+            A.Set(mesh, "Width", u1 - u0);
+            A.Require(mesh, "Insert", "RebarMesh cỡ " + m.RebarSize + " mác " + m.RebarGrade);
         }
 
         private static string Num(double d) { return d.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture); }

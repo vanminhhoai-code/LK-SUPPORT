@@ -9,7 +9,7 @@ namespace MeshFrame.Core
     public class PlanBar
     {
         public BarRole Role;
-        public V2 Start, End;           // đường mép ngoài của cánh đứng. Cánh nằm nằm về bên TRÁI của hướng Start->End. Khung: qua điểm pick. Gia cường: đường chia ô.
+        public V2 Start, End;           // đường mép ngoài của cánh đứng. Cánh nằm nằm về bên TRÁI của hướng Start->End. Khung: qua các điểm pick. Gia cường: đường chia ô.
         public V2? CutStart, CutEnd;    // hướng mặt cắt vát tại đầu (null = cắt vuông)
         public double LegA, LegB, Thk;
         public double ZRef;             // cao độ đường tham chiếu = góc ngoài của V (mặt dưới cánh nằm); cánh đứng hướng lên (+Z)
@@ -37,25 +37,18 @@ namespace MeshFrame.Core
         public V2[] Polygon;            // 1 tấm lưới liên tục phủ cả khung (kéo căng qua các gia cường)
         public double ZBottom, Thickness, WireDia, Pitch, WeightKgPerM2;   // lưới nằm dưới cánh nằm V: Z từ ZBottom (<0) đến 0
         public string Grade, Name, Prefix;
+        public string RebarGrade, RebarSize;   // RebarMesh: mác / cỡ sợi gửi cho Tekla (đã quy về giá trị cuối cùng)
         public int Class, StartNo;
         public MeshKind Kind;
-    }
-
-    public class PlanFastener
-    {
-        public V2 Pos;
-        public FastenKind Kind;
-        public double Dia, Length, ZHead;   // ZHead: cao độ mặt đầu vít (ngoài nẹp); vít đi vào theo +Z
-        public int StripIndex;          // vít này thuộc nẹp nào (chỉ số trong plan.Strips)
+        public bool IsRectangle;        // đa giác là hình chữ nhật (cho phép thử RECTANGULAR_MESH)
     }
 
     /// <summary>Cách đặt trong Tekla, dạng tên enum Tekla (LEFT, FRONT, BEHIND, ...).</summary>
     public class PlanPlacement
     {
         public string VPlane, VRotation, VDepth, StripPlane, StripRotation, StripDepth;
-        public bool FlipMiterCut, FlipBolt;
+        public bool FlipMiterCut;
         public double VLateral, StripLateral;
-        public string BoltStandard;
         public static string Name(PlaneKind k) { return k.ToString().ToUpperInvariant(); }
         public static string Name(RotationKind k) { return k.ToString().ToUpperInvariant(); }
         public static string Name(DepthKind k) { return k.ToString().ToUpperInvariant(); }
@@ -64,13 +57,15 @@ namespace MeshFrame.Core
     public class MeshFramePlan
     {
         public PlanPlacement Placement = new PlanPlacement();
+        public V2[] Polygon;                               // đa giác đã chuẩn hóa (ngược chiều kim đồng hồ)
         public List<PlanBar> Bars = new List<PlanBar>();
         public List<PlanStrip> Strips = new List<PlanStrip>();
         public PlanMesh Mesh;
-        public List<PlanFastener> Fasteners = new List<PlanFastener>();
         public List<double> Cells = new List<double>();    // bề rộng các ô (rỗng nếu không gia cường)
-        public List<string> Errors = new List<string>();
-        public List<string> Warnings = new List<string>();
+        public int BaseEdge = -1;                          // cạnh gốc (chỉ số 0..N-1) dùng chia gia cường
+        public List<string> Errors = new List<string>();   // lỗi: không tạo được
+        public List<string> Warnings = new List<string>(); // cảnh báo: tạo được nhưng cần chú ý
+        public List<string> Notes = new List<string>();    // thông tin trạng thái (vd "Gia cường: không cần")
         public string AsmPrefix; public int AsmStartNo;
     }
 

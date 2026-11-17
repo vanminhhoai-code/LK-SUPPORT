@@ -9,7 +9,8 @@ namespace MeshFrame.Core
 {
     public static class SettingsStore
     {
-        public static void Save(MeshFrameSettings s, string path)
+        /// <summary>Các dòng key=value của thông số (dùng cho file thông số và file bản ghi khung).</summary>
+        public static List<string> ToLines(MeshFrameSettings s)
         {
             var lines = new List<string>();
             foreach (FieldInfo f in typeof(MeshFrameSettings).GetFields(BindingFlags.Public | BindingFlags.Instance))
@@ -17,18 +18,28 @@ namespace MeshFrame.Core
                 object v = f.GetValue(s);
                 lines.Add(f.Name + "=" + Convert.ToString(v is Enum ? (object)v.ToString() : v, CultureInfo.InvariantCulture));
             }
+            return lines;
+        }
+
+        public static void Save(MeshFrameSettings s, string path)
+        {
             string dir = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            File.WriteAllLines(path, lines.ToArray());
+            File.WriteAllLines(path, ToLines(s).ToArray());
         }
 
         /// <summary>Nạp từ file; thiếu file hoặc khóa lỗi thì giữ giá trị mặc định.</summary>
         public static MeshFrameSettings Load(string path)
         {
+            if (!File.Exists(path)) return new MeshFrameSettings();
+            return FromLines(File.ReadAllLines(path));
+        }
+
+        public static MeshFrameSettings FromLines(IEnumerable<string> lines)
+        {
             var s = new MeshFrameSettings();
-            if (!File.Exists(path)) return s;
             var map = new Dictionary<string, string>();
-            foreach (string line in File.ReadAllLines(path))
+            foreach (string line in lines)
             {
                 int i = line.IndexOf('=');
                 if (i > 0) map[line.Substring(0, i).Trim()] = line.Substring(i + 1);

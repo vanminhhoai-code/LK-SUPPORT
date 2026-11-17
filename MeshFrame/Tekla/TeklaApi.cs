@@ -10,7 +10,7 @@ namespace MeshFrame.Tekla
 {
     public sealed class TeklaApi
     {
-        private readonly Assembly _model, _geo;
+        private readonly Assembly _model, _geo, _cat;
 
         /// <summary>Mọi lời gọi SDK đi qua đây (Cover Tool gắn SdkThread.Invoke).</summary>
         public Func<Func<object>, object> Invoke = delegate (Func<object> f) { return f(); };
@@ -18,10 +18,15 @@ namespace MeshFrame.Tekla
         /// <summary>Ghi lại "Kiểu::Thành viên" đã dùng, để test hợp đồng đối chiếu DLL thật.</summary>
         public Action<string> Trace;
 
-        public TeklaApi(Assembly modelAssembly, Assembly geometryAssembly)
+        public TeklaApi(Assembly modelAssembly, Assembly geometryAssembly) : this(modelAssembly, geometryAssembly, null) { }
+
+        public TeklaApi(Assembly modelAssembly, Assembly geometryAssembly, Assembly catalogAssembly)
         {
-            _model = modelAssembly; _geo = geometryAssembly;
+            _model = modelAssembly; _geo = geometryAssembly; _cat = catalogAssembly;
         }
+
+        /// <summary>Có Tekla.Structures.Catalogs.dll (catalog rebar, mesh, ...) không.</summary>
+        public bool HasCatalogs { get { return _cat != null; } }
 
         /// <summary>Nạp Tekla.Structures.dll + Tekla.Structures.Model.dll trong thư mục API của một bản Tekla.</summary>
         public static TeklaApi Load(string folder)
@@ -33,10 +38,14 @@ namespace MeshFrame.Tekla
             };
             Assembly geo = Assembly.LoadFrom(Path.Combine(folder, "Tekla.Structures.dll"));
             Assembly mdl = Assembly.LoadFrom(Path.Combine(folder, "Tekla.Structures.Model.dll"));
-            return new TeklaApi(mdl, geo);
+            string catPath = Path.Combine(folder, "Tekla.Structures.Catalogs.dll");
+            Assembly cat = null;
+            if (File.Exists(catPath)) { try { cat = Assembly.LoadFrom(catPath); } catch (Exception) { cat = null; } }
+            return new TeklaApi(mdl, geo, cat);
         }
 
         public Type ModelType(string name) { return _model.GetType("Tekla.Structures.Model." + name, true); }
+        public Type CatalogType(string name) { if (_cat == null) throw new InvalidOperationException("Không có Tekla.Structures.Catalogs.dll."); return _cat.GetType("Tekla.Structures.Catalogs." + name, true); }
         public Type GeoType(string name) { return _geo.GetType("Tekla.Structures.Geometry3d." + name, true); }
 
         public object New(Type type, params object[] args)
@@ -128,6 +137,37 @@ namespace MeshFrame.Tekla
             throw new MissingMethodException(target.GetType().FullName, name + "/" + args.Length);
         }
 
+        /// <summary>Gọi hàm có tham số ref/out (vd GetUserProperty(name, ref value)). Trả về mảng đối số SAU khi gọi (giá trị ref nằm trong đó).</summary>
+        public object[] CallRef(object target, string name, params object[] args)
+        {
+            for (Type l = target.GetType(); l != null; l = l.BaseType)
+            {
+                foreach (MethodInfo m in l.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+                {
+                    if (m.Name != name || m.IsGenericMethodDefinition) continue;
+                    ParameterInfo[] ps = m.GetParameters();
+                    if (ps.Length != args.Length) continue;
+                    object[] conv = new object[args.Length];
+                    bool ok = true, anyRef = false;
+                    for (int i = 0; i < ps.Length; i++)
+                    {
+                        Type pt = ps[i].ParameterType;
+                        if (pt.IsByRef) { anyRef = true; pt = pt.GetElementType(); }
+                        conv[i] = Coerce(pt, args[i]);
+                        if (conv[i] != null && !pt.IsInstanceOfType(conv[i])) { ok = false; break; }
+                    }
+                    if (!ok || !anyRef) continue;
+                    var chains = new string[args.Length];
+                    for (int i = 0; i < ps.Length; i++) chains[i] = Chain(args[i]) + (ps[i].ParameterType.IsByRef ? "&" : "");
+                    Note("call " + target.GetType().FullName + "::" + name + "(" + string.Join(";", chains) + ")");
+                    MethodInfo method = m;
+                    Run(delegate { return method.Invoke(target, conv); });
+                    return conv;
+                }
+            }
+            throw new MissingMethodException(target.GetType().FullName, name + "/" + args.Length + " (ref)");
+        }
+
         /// <summary>Gọi hàm trả bool (Insert/Modify...). Tekla trả false thì ném lỗi kèm mô tả.</summary>
         public void Require(object target, string name, string what, params object[] args)
         {
@@ -166,6 +206,7 @@ namespace MeshFrame.Tekla
         {
             if (v == null || t.IsInstanceOfType(v)) return v;
             if (t.IsEnum && v is string) return System.Enum.Parse(t, (string)v);
+            if (v is string) return v;                                   // không ép chuỗi sang số/enum khác (tránh chọn nhầm overload)
             if (v is IConvertible && typeof(IConvertible).IsAssignableFrom(t) && !t.IsEnum) return Convert.ChangeType(v, t, CultureInfo.InvariantCulture);
             return v;
         }
