@@ -28,27 +28,40 @@ namespace MeshFrame.Tekla
 
         public void StopEditing() { _editMain = null; _editId = null; }
 
-        /// <summary>Tạo khung mới; nếu đang sửa thì tạo khung mới rồi xóa khung cũ (lỗi thì giữ nguyên khung cũ).</summary>
+        /// <summary>Tạo khung mới. Nếu đang sửa khung có sẵn thì CẬP NHẬT TẠI CHỖ (sửa chính các part cũ, thêm / xóa phần chênh lệch).
+        /// Cập nhật tại chỗ lỗi thì dựng lại khung mới rồi xóa khung cũ (không để hai khung đè nhau).</summary>
         public ServiceResult Create(MeshFrameSettings settings, V3[] corners)
         {
             bool replacing = _editMain != null;
             string id = replacing ? _editId : FrameRecord.NewId();
-            var writer = new TeklaModelWriter(A, _model) { FrameId = id };
             var sb = new StringBuilder();
+            TeklaModelWriter writer = new TeklaModelWriter(A, _model) { FrameId = id, ReuseMain = replacing ? _editMain : null };
             BuildResult r;
+            bool inPlaceFailed = false;
             try { r = MeshFrameBuilder.Build(settings, corners, writer); }
             catch (Exception ex)
             {
                 while (ex.InnerException != null) ex = ex.InnerException;
-                return new ServiceResult { Success = false, Message = "Lỗi khi tạo trong Tekla: " + ex.Message + (replacing ? "\nKhung cũ được giữ nguyên." : "") };
+                if (!replacing) return new ServiceResult { Success = false, Message = "Lỗi khi tạo trong Tekla: " + ex.Message };
+                // cập nhật tại chỗ lỗi: dựng khung mới + xóa khung cũ
+                inPlaceFailed = true;
+                sb.AppendLine("⚠ Cập nhật tại chỗ lỗi (" + ex.Message + "): dựng lại khung mới và xóa khung cũ.");
+                writer = new TeklaModelWriter(A, _model) { FrameId = id };
+                try { r = MeshFrameBuilder.Build(settings, corners, writer); }
+                catch (Exception ex2)
+                {
+                    while (ex2.InnerException != null) ex2 = ex2.InnerException;
+                    return new ServiceResult { Success = false, Message = "Lỗi khi tạo trong Tekla: " + ex2.Message + "\nKhung cũ có thể đã bị sửa dở: dùng Undo của Tekla nếu cần." };
+                }
             }
             if (!r.Success) return new ServiceResult { Success = false, Message = string.Join("\n", r.Errors.ToArray()) };
 
             MeshFramePlan p = r.Plan;
             int stiff = 0; foreach (PlanBar b in p.Bars) if (b.Role == BarRole.Stiffener) stiff++;
-            sb.AppendLine(string.Format("Đã tạo: {0} V khung, {1} gia cường, {2} nẹp.", p.Bars.Count - stiff, stiff, p.Strips.Count));
+            sb.AppendLine(string.Format(replacing && !inPlaceFailed ? "Đã cập nhật khung: {0} V khung, {1} gia cường, {2} nẹp." : "Đã tạo: {0} V khung, {1} gia cường, {2} nẹp.", p.Bars.Count - stiff, stiff, p.Strips.Count));
 
-            if (replacing)
+            if (replacing && !inPlaceFailed) { _editMain = null; _editId = null; }
+            else if (replacing)
             {
                 try { int n = TeklaFrameStore.DeleteFrame(A, _editMain); sb.AppendLine("Đã thay khung cũ (xóa " + n + " part)."); }
                 catch (Exception ex) { sb.AppendLine("⚠ Không xóa được khung cũ: " + Root(ex).Message + " (xóa tay khung cũ)."); }

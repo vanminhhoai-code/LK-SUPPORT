@@ -10,6 +10,7 @@ namespace MeshFrame.Tekla
     public static class TeklaFrameStore
     {
         public const string IdKey = "MESHFRAME_ID";
+        public const string KeyKey = "MESHFRAME_KEY";      // khóa từng part trong khung: B{i} thanh V, S{i} nẹp, M lưới (để cập nhật tại chỗ)
 
         /// <summary>Thư mục của model đang mở ("" nếu model chưa lưu).</summary>
         public static string ModelFolder(TeklaApi api, object model)
@@ -22,11 +23,17 @@ namespace MeshFrame.Tekla
 
         public static void WriteId(TeklaApi api, object mainPart, string id) { api.Call(mainPart, "SetUserProperty", IdKey, id); }
 
-        public static string ReadId(TeklaApi api, object obj)
+        public static void WriteKey(TeklaApi api, object part, string key) { api.Call(part, "SetUserProperty", KeyKey, key); }
+
+        public static string ReadKey(TeklaApi api, object obj) { return ReadProp(api, obj, KeyKey); }
+
+        public static string ReadId(TeklaApi api, object obj) { return ReadProp(api, obj, IdKey); }
+
+        private static string ReadProp(TeklaApi api, object obj, string name)
         {
             try
             {
-                object[] r = api.CallRef(obj, "GetUserProperty", IdKey, "");
+                object[] r = api.CallRef(obj, "GetUserProperty", name, "");
                 return Convert.ToString(r[1]) ?? "";
             }
             catch (MissingMethodException) { return ""; }
@@ -60,6 +67,19 @@ namespace MeshFrame.Tekla
             return "";
         }
 
+        /// <summary>Xóa các cốt thép (RebarMesh) gắn vào part. Lỗi / bản Tekla không có hàm này thì bỏ qua.</summary>
+        public static void DeleteReinforcements(TeklaApi api, object part)
+        {
+            try
+            {
+                var list = new List<object>();
+                object en = api.Call(part, "GetReinforcements");
+                while (en != null && (bool)api.Call(en, "MoveNext")) list.Add(api.Get(en, "Current"));
+                foreach (object o in list) api.Call(o, "Delete");
+            }
+            catch (MissingMethodException) { }
+        }
+
         /// <summary>Xóa mọi part của assembly chứa part chính (part phụ trước, part chính sau). Trả về số part đã xóa.</summary>
         public static int DeleteFrame(TeklaApi api, object mainPart)
         {
@@ -69,6 +89,7 @@ namespace MeshFrame.Tekla
             if (secs != null) foreach (object o in secs) parts.Add(o);
             parts.Add(mainPart);
             int n = 0;
+            foreach (object p in parts) DeleteReinforcements(api, p);       // RebarMesh gắn vào part (không nằm trong assembly)
             foreach (object p in parts)
             {
                 api.Call(p, "Delete");

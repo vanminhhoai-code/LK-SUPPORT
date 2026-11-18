@@ -63,6 +63,9 @@ namespace MeshFrame.Core
         public PlanMesh Mesh;
         public List<double> Cells = new List<double>();    // bề rộng các ô (rỗng nếu không gia cường)
         public int BaseEdge = -1;                          // cạnh gốc (chỉ số 0..N-1) dùng chia gia cường
+        public V2 BaseOrigin, BaseDir;                     // điểm đầu + hướng đơn vị của cạnh gốc; các vị trí dưới đây đo dọc BaseDir từ BaseOrigin
+        public double BaseMin, BaseMax;                    // hai mép ngoài của khung dọc cạnh gốc
+        public List<double> StiffTims = new List<double>(); // vị trí TIM từng V gia cường (cùng thang BaseMin..BaseMax)
         public List<string> Errors = new List<string>();   // lỗi: không tạo được
         public List<string> Warnings = new List<string>(); // cảnh báo: tạo được nhưng cần chú ý
         public List<string> Notes = new List<string>();    // thông tin trạng thái (vd "Gia cường: không cần")

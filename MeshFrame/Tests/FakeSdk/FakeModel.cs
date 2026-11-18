@@ -9,6 +9,8 @@ namespace Tekla.Structures.Model
     public static class FakeLog
     {
         public static readonly List<string> Entries = new List<string>();
+        public static int FailModifyAt = -1, ModifyCount;   // làm Modify của Beam thứ n thất bại
+        public static readonly List<Boolean> Booleans = new List<Boolean>();
         public static double Bias;   // lệch ngang giả của mọi thanh thật (không phải thanh mẫu)
         public static bool RejectInsert, RejectRebarMesh, RejectPolygonMesh, NonAsciiPrompt, NoSolid, NullAssembly;
         public static int SectionTurn;                                                    // xoay thêm tiết diện giả (độ) để thử quy ước đặt khác
@@ -25,7 +27,7 @@ namespace Tekla.Structures.Model
         public static void Add(string s) { Entries.Add(s); }
         public static void Reset()
         {
-            Bias = 0; Entries.Clear(); BeamPositions.Clear(); BeamStarts.Clear(); Beams.Clear(); SectionTurn = 0; NoSolid = false; NullAssembly = false; Meshes.Clear(); Prompts.Clear(); Uda.Clear(); Selected.Clear();
+            Bias = 0; FailModifyAt = -1; ModifyCount = 0; Booleans.Clear(); Entries.Clear(); BeamPositions.Clear(); BeamStarts.Clear(); Beams.Clear(); SectionTurn = 0; NoSolid = false; NullAssembly = false; Meshes.Clear(); Prompts.Clear(); Uda.Clear(); Selected.Clear();
             RejectInsert = RejectRebarMesh = RejectPolygonMesh = false; FailBeamAt = -1; BeamCount = 0;
         }
     }
@@ -59,10 +61,23 @@ namespace Tekla.Structures.Model
             }
             var m = this as RebarMesh;
             if (m != null) m.Validate();
+            var bo = this as Boolean;
+            if (bo != null) FakeLog.Booleans.Add(bo);
             return !FakeLog.RejectInsert;
         }
-        public bool Modify() { FakeLog.Add("Modify " + GetType().Name); return true; }
-        public bool Delete() { FakeLog.Add("Delete " + GetType().Name); return true; }
+        public bool Modify()
+        {
+            FakeLog.Add("Modify " + GetType().Name);
+            if (this is Beam && ((Beam)this).Name != "MF_CALIB") { FakeLog.ModifyCount++; if (FakeLog.ModifyCount == FakeLog.FailModifyAt) return false; }
+            return true;
+        }
+        public bool Delete()
+        {
+            FakeLog.Add("Delete " + GetType().Name);
+            var bo = this as Boolean; if (bo != null) FakeLog.Booleans.Remove(bo);
+            var rm = this as RebarMesh; if (rm != null) FakeLog.Meshes.Remove(rm);
+            return true;
+        }
         public bool SetUserProperty(string name, string value)
         {
             Dictionary<string, string> d; if (!FakeLog.Uda.TryGetValue(this, out d)) { d = new Dictionary<string, string>(); FakeLog.Uda[this] = d; }
@@ -92,6 +107,8 @@ namespace Tekla.Structures.Model
         public Position Position { get; set; } = new Position();
         private static readonly Dictionary<Part, Assembly> asm = new Dictionary<Part, Assembly>();
         internal static void Link(Part p, Assembly a) { asm[p] = a; }
+        public ModelObjectEnumerator GetBooleans() { var l = new List<ModelObject>(); foreach (Boolean b in FakeLog.Booleans) if (ReferenceEquals(b.Father, this)) l.Add(b); return new ModelObjectEnumerator(l); }
+        public ModelObjectEnumerator GetReinforcements() { var l = new List<ModelObject>(); foreach (RebarMesh r in FakeLog.Meshes) if (ReferenceEquals(r.Father, this)) l.Add(r); return new ModelObjectEnumerator(l); }
         public Assembly GetAssembly() { if (FakeLog.NullAssembly) return null; Assembly a; if (!asm.TryGetValue(this, out a)) { a = new Assembly(this); asm[this] = a; } return a; }
     }
     /// <summary>Hình khối giả: lăng trụ của tiết diện (y, z) dọc trục X. Dùng để thử thuật toán tự canh với một quy ước đặt KHÁC giả định của app.</summary>
@@ -276,9 +293,13 @@ namespace Tekla.Structures.Model
     public class ModelObjectEnumerator
     {
         private int _i = -1;
-        public bool MoveNext() { _i++; return _i < FakeLog.Selected.Count; }
-        public ModelObject Current { get { return FakeLog.Selected[_i]; } }
-        public int GetSize() { return FakeLog.Selected.Count; }
+        private readonly List<ModelObject> _src;
+        public ModelObjectEnumerator() { _src = null; }
+        public ModelObjectEnumerator(List<ModelObject> src) { _src = src; }
+        private List<ModelObject> L { get { return _src ?? FakeLog.Selected; } }
+        public bool MoveNext() { _i++; return _i < L.Count; }
+        public ModelObject Current { get { return L[_i]; } }
+        public int GetSize() { return L.Count; }
     }
 }
 namespace Tekla.Structures.Model.UI

@@ -23,6 +23,7 @@ namespace MeshFrame.Core
         public string AsmPrefix = "KL";
         public int AsmStartNo = 1;
         public CornerKind Corner = CornerKind.Miter;
+        public int AnchorPoint = 1;                      // điểm gốc (1..N): đứng yên khi sửa số trên hình; gốc tọa độ khi dựng vào Tekla
 
         // ---- Gia cường: thanh V CÙNG TIẾT DIỆN với V khung, vuông góc đố trên/dưới, hai đầu cắt khuyết cho khớp V khung
         public StiffMode StiffMode = StiffMode.Equal;

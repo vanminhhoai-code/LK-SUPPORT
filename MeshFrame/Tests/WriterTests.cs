@@ -108,7 +108,7 @@ static class WriterTests
         r = MeshFrameBuilder.Build(new MeshFrameSettings { AutoPlacement = false }, corners, w);
         Check("RebarMesh bi tu choi: thu da giac roi chu nhat (2 lan), thay bang tam", Count("Insert RebarMesh") == 2 && Count("Insert ContourPlate") == 7 && r.Success);
         Check("canh bao co ly do cua Tekla + noi ro da thay bang tam", w.Messages.Count == 1 && w.Messages[0].Contains("required info missing") && w.Messages[0].Contains("lưới dạng tấm"));
-        Check("van gop assembly day du + gan ma", Count("Add Beam") == 13 && Count("Add ContourPlate") == 1 && Count("Modify Assembly") == 1 && CountStart("UDA ") == 1);
+        Check("van gop assembly day du + gan ma", Count("Add Beam") == 13 && Count("Add ContourPlate") == 1 && Count("Modify Assembly") == 1 && CountStart("UDA MESHFRAME_ID=") == 1 && CountStart("UDA MESHFRAME_KEY=") == 15);
         Check("van tra mat phang + commit", Count("SetPlane") == 2 && Count("Commit") == 1);
         Reset(); FakeLog.RejectPolygonMesh = true;
         w = new TeklaModelWriter(api, null);
@@ -283,20 +283,38 @@ static class WriterTests
         FrameRecord loaded = svc.LoadSelected(out err);
         if (loaded == null) Console.WriteLine("DEBUG LoadSelected: " + err);
         Check("chon 1 part PHU cua khung -> tim ra khung qua assembly", loaded != null && loaded.Id == sr.FrameId && svc.EditingId == sr.FrameId && err == null);
+        int meshBefore = FakeLog.Meshes.Count;
         FakeLog.Entries.Clear();
         var s2 = new MeshFrameSettings { AutoPlacement = false, VLegA = 30, VLegB = 30, StripWidth = 30 };
+        int cutsBefore = FakeLog.Booleans.Count;
         ServiceResult sr2 = svc.Create(s2, loaded.Corners);
-        Check("sua: tao khung moi roi xoa khung cu (14 part), cung ma", sr2.Success && sr2.FrameId == sr.FrameId && Count("Delete Beam") == 14 && sr2.Message.Contains("Đã thay khung cũ"));
-        Check("sua: xoa SAU khi tao khung moi", FakeLog.Entries.IndexOf("Delete Beam") > FakeLog.Entries.LastIndexOf("Insert Beam"));
-        Check("sua: ban ghi duoc ghi de bang thong so moi, het che do sua", FrameRecord.Load(recPath).Settings.VLegA == 30 && svc.EditingId == null);
-        // lỗi khi sửa -> giữ khung cũ
-        ModelObject main2 = FakeLog.Uda.Keys.Last();
-        FakeLog.Selected.Clear(); FakeLog.Selected.Add(main2);
+        Check("cap nhat tai cho: KHONG tao beam moi, KHONG xoa beam, sua 14 part", sr2.Success && sr2.FrameId == sr.FrameId && Count("Insert Beam") == 0 && Count("Delete Beam") == 0 && Count("Modify Beam") == 14);
+        Check("cap nhat tai cho: thong bao ro so part sua/them/xoa", sr2.Message.Contains("Đã cập nhật khung") && sr2.Message.Contains("sửa 14 part, thêm 0, xóa 0"));
+        Check("cap nhat tai cho: ban ghi duoc ghi de bang thong so moi, het che do sua", FrameRecord.Load(recPath).Settings.VLegA == 30 && svc.EditingId == null);
+        Check("cap nhat tai cho: vet cat cu bi xoa va lam lai (khong chong chat, so luong khong doi), luoi cu bi xoa roi tao lai", FakeLog.Booleans.Count == cutsBefore && FakeLog.Meshes.Count == meshBefore);
+        Check("cap nhat tai cho: profile cua chinh part cu doi sang L30*30*2", FakeLog.Beams.Where(x => x.Profile.ProfileString.StartsWith("L30")).Count() >= 7);
+        // đổi số thanh gia cường (3 -> 1): sửa 10 part, xóa 4 part thừa
+        ModelObject main3 = FakeLog.Uda.Keys.First();
+        FakeLog.Selected.Clear(); FakeLog.Selected.Add(main3);
         loaded = svc.LoadSelected(out err);
-        FakeLog.Entries.Clear(); FakeLog.BeamCount = 0; FakeLog.FailBeamAt = 3;
+        FakeLog.Entries.Clear();
+        var s3 = new MeshFrameSettings { AutoPlacement = false, VLegA = 30, VLegB = 30, StripWidth = 30, StiffMax = 2000 };
+        ServiceResult sr2b = svc.Create(s3, loaded.Corners);
+        Check("cap nhat tai cho doi so gia cuong 3 -> 1: sua 10, xoa 4 part thua, khong tao moi", sr2b.Success && Count("Insert Beam") == 0 && Count("Delete Beam") == 4 && sr2b.Message.Contains("sửa 10 part, thêm 0, xóa 4"));
+        // cập nhật tại chỗ lỗi (Modify lần thứ 3 thất bại) -> dựng lại khung mới + xóa khung cũ, không chồng hai khung
+        FakeLog.Selected.Clear(); FakeLog.Selected.Add(main3);
+        loaded = svc.LoadSelected(out err);
+        FakeLog.Entries.Clear(); FakeLog.ModifyCount = 0; FakeLog.FailModifyAt = 3;
         ServiceResult sr3 = svc.Create(s2, loaded.Corners);
+        FakeLog.FailModifyAt = -1;
+        Check("cap nhat tai cho loi: dung lai khung moi va xoa het khung cu, noi ro ly do", sr3.Success && sr3.Message.Contains("dựng lại khung mới") && Count("Insert Beam") == 14 && Count("Delete Beam") >= 10 && sr3.Message.Contains("Đã thay khung cũ"));
+        ModelObject main2 = FakeLog.Uda.Keys.Last();
+        svc.StopEditing();
+        // lỗi khi tạo khung MỚI được rollback
+        FakeLog.Entries.Clear(); FakeLog.BeamCount = 0; FakeLog.FailBeamAt = 3;
+        ServiceResult sr3b = svc.Create(new MeshFrameSettings { AutoPlacement = false }, corners);
         FakeLog.FailBeamAt = -1;
-        Check("sua bi loi: bao 'giu nguyen khung cu', chi rollback khung moi (2 beam), van o che do sua", !sr3.Success && sr3.Message.Contains("giữ nguyên") && Count("Delete Beam") == 2 && svc.EditingId != null);
+        Check("tao moi bi loi: rollback 2 beam da tao, bao loi", !sr3b.Success && Count("Delete Beam") >= 2);
         // part không thuộc assembly nào (GetAssembly = null): trước đây NullReferenceException
         FakeLog.NullAssembly = true;
         FakeLog.Selected.Clear(); FakeLog.Selected.Add(secondary);

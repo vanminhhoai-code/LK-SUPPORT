@@ -13,11 +13,13 @@ namespace MeshFrame.UI
         private MeshFramePlan _plan;
         private V2[] _poly;
         private double _legA;
+        public readonly DimLayer Dims;
         private string _empty = "Chưa có điểm. Bấm \"Pick lại\" để pick đa giác trong Tekla.";
 
         public PreviewControl()
         {
             DoubleBuffered = true;
+            Dims = new DimLayer(this);
             BackColor = Color.FromArgb(27, 28, 32);
         }
 
@@ -28,6 +30,13 @@ namespace MeshFrame.UI
             _plan = plan; _poly = plan != null && plan.Polygon != null ? plan.Polygon : poly; _legA = frameLegA;
             Invalidate();
         }
+
+        public void SetDims(System.Collections.Generic.List<DimItem> items, int anchor) { Dims.SetItems(items, anchor); Invalidate(); }
+
+        protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); if (e.Button == MouseButtons.Left) { Focus(); Dims.MouseDown(e.Location); } }
+        protected override void OnDoubleClick(EventArgs e) { base.OnDoubleClick(e); Dims.DoubleClick(PointToClient(Cursor.Position)); }
+        protected override bool IsInputKey(Keys k) { return k == Keys.F2 || k == Keys.Enter || base.IsInputKey(k); }
+        protected override void OnKeyDown(KeyEventArgs e) { base.OnKeyDown(e); Dims.KeyDown(e.KeyCode); }
 
         public void ShowEmpty(string text) { _plan = null; _poly = null; if (text != null) _empty = text; Invalidate(); }
 
@@ -44,6 +53,7 @@ namespace MeshFrame.UI
 
             double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
             foreach (V2 p in _poly) { minX = Math.Min(minX, p.X); maxX = Math.Max(maxX, p.X); minY = Math.Min(minY, p.Y); maxY = Math.Max(maxY, p.Y); }
+            foreach (DimItem d in Dims.Items) foreach (V2 p in new[] { d.A, d.B }) { minX = Math.Min(minX, p.X); maxX = Math.Max(maxX, p.X); minY = Math.Min(minY, p.Y); maxY = Math.Max(maxY, p.Y); }
             double bw = maxX - minX, bh = maxY - minY;
             if (bw < 1 || bh < 1) return;
             const int pad = 60;
@@ -80,7 +90,7 @@ namespace MeshFrame.UI
                 FillBand(g, T, s.Start, s.End, -s.Width / 2, s.Width / 2, Color.FromArgb(200, 39, 174, 96));
 
             using (var pen = new Pen(Color.FromArgb(150, 158, 170), 1.2f)) g.DrawPolygon(pen, TA(_poly));
-            DrawLabels(g, T);
+            if (Dims.Items.Count > 0) { Dims.Back = BackColor; Dims.Draw(g, T); } else DrawLabels(g, T);
         }
 
         // Tên điểm P1..PN, số cạnh và chiều dài từng cạnh (cạnh gốc gia cường tô đậm)

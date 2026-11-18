@@ -46,7 +46,8 @@ namespace MeshFrame.Core
                 int tc = 0; foreach (bool t in through) if (t) tc++;
                 plan.Notes.Add("Nối góc: " + tc + " cạnh chạy dài (song song cạnh " + (bEdge + 1) + "), " + (n - tc) + " cạnh dừng/cắt gọt.");
             }
-            double d0 = s.StripOffset();                 // nẹp phủ [d0, d0 + w] tính từ mép ngoài khung vào trong
+            // Nẹp quanh khung: mép ngoài luôn trùng mép ngoài V khung. Vị trí Giữa/Trái/Phải (StripPos) chỉ áp cho nẹp trên V gia cường.
+            const double d0 = 0;
 
             // ---------- Lưới: 1 tấm liên tục, lùi MeshGap so với mép ngoài khung
             V2[] meshPoly = Geo.Offset(poly, s.MeshGap);
@@ -100,13 +101,13 @@ namespace MeshFrame.Core
             }
 
             // ---------- Gia cường
-            AddStiffeners(plan, s, poly, tV, zStrip, d0);
+            AddStiffeners(plan, s, poly, tV, zStrip, s.StripOffset());
             WarnLimits(plan, s, poly);
             return plan;
         }
 
         // ---------------------------------------------------------------- gia cường
-        private static void AddStiffeners(MeshFramePlan plan, MeshFrameSettings s, V2[] poly, double tV, double zStrip, double d0)
+        private static void AddStiffeners(MeshFramePlan plan, MeshFrameSettings s, V2[] poly, double tV, double zStrip, double d0s)
         {
             if (s.StiffMode == StiffMode.None) { plan.Notes.Add("Gia cường: không dùng."); return; }
             int n = poly.Length;
@@ -124,6 +125,8 @@ namespace MeshFrame.Core
             List<double> cells = CellWidths(s, total, plan);
             if (plan.Errors.Count > 0) return;
             plan.Cells = cells;
+            plan.BaseOrigin = poly[baseEdge]; plan.BaseDir = u; plan.BaseMin = m0; plan.BaseMax = m1;
+            { double c0 = 0; for (int i = 0; i < cells.Count - 1; i++) { c0 += cells[i]; plan.StiffTims.Add(m0 + c0); } }
             if (cells.Count <= 1)
             {
                 plan.Notes.Add("Gia cường: không cần - kích thước dọc cạnh gốc " + F(total) + " mm " +
@@ -134,7 +137,7 @@ namespace MeshFrame.Core
             double w = s.StripWidth, legA = s.VLegA;
             V2[] Q = Geo.Offset(poly, tV);                              // mặt trong cánh đứng V khung
             if (!Geo.OffsetValid(poly, Q)) { plan.Errors.Add("Khung quá nhỏ hoặc hẹp để đặt gia cường."); return; }
-            V2[] R = s.UseStrip ? Geo.Offset(poly, d0 + w) : null;       // mép trong nẹp chu vi
+            V2[] R = s.UseStrip ? Geo.Offset(poly, w) : null;            // mép trong nẹp chu vi
             if (R != null && !Geo.OffsetValid(poly, R)) R = null;
 
             double minLen = 2 * legA;                                    // ngắn hơn thì hai khuyết chiếm hết
@@ -143,7 +146,8 @@ namespace MeshFrame.Core
             for (int i = 0; i < dividers; i++)
             {
                 cum += cells[i];
-                V2 O = poly[baseEdge] + u * (m0 + cum);                  // điểm trên đường chia (mặt ngoài cánh đứng gia cường)
+                // cum = vị trí TIM V gia cường (giữa bề rộng cánh nằm) tính từ mép ngoài khung; đường tham chiếu (mặt ngoài cánh đứng) lùi legA/2.
+                V2 O = poly[baseEdge] + u * (m0 + cum - legA / 2);
                 foreach (Geo.LineSeg seg in Geo.ClipLine(Q, O, perp))
                 {
                     V2 pa = O + perp * seg.T0, pb = O + perp * seg.T1;   // pa: đầu t nhỏ (cạnh E0), pb: đầu t lớn (cạnh E1)
@@ -167,8 +171,8 @@ namespace MeshFrame.Core
                 }
                 if (R != null)
                 {
-                    // Nẹp PL nằm ngay dưới cánh nằm gia cường: phủ offset [d0, d0 + w] về phía +u (d0 theo vị trí nẹp Giữa/Trái/Phải).
-                    V2 O2 = O + u * (d0 + w / 2);
+                    // Nẹp PL nằm ngay dưới cánh nằm gia cường: phủ [d0s, d0s + w] về phía +u tính từ đường tham chiếu (Giữa/Trái/Phải).
+                    V2 O2 = O + u * (d0s + w / 2);
                     foreach (Geo.LineSeg seg in Geo.ClipLine(R, O2, perp))
                     {
                         V2 na = O2 + perp * seg.T0, nb = O2 + perp * seg.T1;
@@ -182,7 +186,9 @@ namespace MeshFrame.Core
                 plan.Warnings.Add("Không tạo được gia cường: " + dividers + " đường chia đều ngắn hơn " + F(minLen) + " mm hoặc nằm ngoài khung.");
             else if (skipped > 0)
                 plan.Warnings.Add("Bỏ " + skipped + " đoạn gia cường ngắn hơn " + F(minLen) + " mm (không đủ chỗ cắt khuyết).");
-            plan.Notes.Add("Gia cường: " + barsMade + " thanh theo " + cells.Count + " ô, vuông góc cạnh " + (baseEdge + 1) + ".");
+            if (cells[0] < tV + legA / 2 + 1 || cells[cells.Count - 1] < tV + legA / 2 + 1)
+                plan.Warnings.Add("Ô đầu hoặc ô cuối (tính tới tim V gia cường) quá hẹp: V gia cường chồng lên V khung (cần ≥ " + F(tV + legA / 2) + " mm).");
+            plan.Notes.Add("Gia cường: " + barsMade + " thanh theo " + cells.Count + " ô (đo tới tim V), vuông góc cạnh " + (baseEdge + 1) + ".");
             if (s.UseStrip)
                 for (int i = 0; i < cells.Count; i++)
                     if (cells[i] <= w + legA) plan.Warnings.Add("Ô " + (i + 1) + " (" + F(cells[i]) + " mm) rất hẹp so với nẹp/gia cường.");
@@ -360,10 +366,16 @@ namespace MeshFrame.Core
     public static class MeshFrameBuilder
     {
         /// <summary>Hệ trục + đa giác 2D từ các điểm 3D (GLOBAL). Dùng chung cho xem trước trong app và tạo trong Tekla.</summary>
-        public static bool TryFrame(V3[] corners, out Frame frame, out V2[] poly, out string error)
+        public static bool TryFrame(V3[] corners, out Frame frame, out V2[] poly, out string error) { return TryFrame(corners, 0, out frame, out poly, out error); }
+
+        /// <summary>anchor = chỉ số điểm gốc (0..N-1): gốc tọa độ của mặt phẳng khung đặt tại điểm đó, trục U đi tới điểm kế.</summary>
+        public static bool TryFrame(V3[] corners, int anchor, out Frame frame, out V2[] poly, out string error)
         {
-            poly = null;
-            if (!Frame.TryCreate(corners, out frame, out error)) return false;
+            poly = null; frame = null; error = null;
+            if (corners == null || corners.Length < 3) { error = "Cần ít nhất 3 điểm."; return false; }
+            int n0 = corners.Length; anchor = ((anchor % n0) + n0) % n0;
+            var rot = new V3[n0]; for (int i = 0; i < n0; i++) rot[i] = corners[(anchor + i) % n0];
+            if (!Frame.TryCreate(rot, out frame, out error)) return false;
             poly = new V2[corners.Length];
             for (int i = 0; i < corners.Length; i++) poly[i] = frame.To2D(corners[i]);
             return true;
@@ -374,7 +386,7 @@ namespace MeshFrame.Core
         {
             var r = new BuildResult();
             Frame f; V2[] poly; string err;
-            if (!TryFrame(corners, out f, out poly, out err)) { r.Errors.Add(err); return r; }
+            if (!TryFrame(corners, s.AnchorPoint - 1, out f, out poly, out err)) { r.Errors.Add(err); return r; }
             r.Frame = f;
             r.Plan = MeshFramePlanner.Plan(s, poly);
             if (r.Plan.Errors.Count > 0) { r.Errors.AddRange(r.Plan.Errors); return r; }

@@ -41,3 +41,10 @@ Trạng thái kiểm chứng: API tạo model đã đối chiếu **2021 và 202
 - Tab Khung V: kiểu nối góc "Cắt vát 45°" hoặc "Một cạnh chạy dài, một cạnh dừng" (cạnh song song cạnh gốc chạy dài, cạnh còn lại dừng sát mặt trong + khuyết cánh nằm), dùng cho đa giác bất kỳ.
 - Tổng ô nhập tay lớn hơn kích thước khung: chỉ cảnh báo, cắt ở mép khung, không khóa nút Tạo khung.
 - Vòng kín trong Tekla: sau khi tạo, đo lại hình khối thật của TỪNG thanh V và nẹp (Solid.Intersect), dời thanh lệch về đúng vị trí kế hoạch, ghi số đo trong kết quả. CHƯA chạy thử trên Tekla thật.
+
+## Bản 1.2.0
+- Chuỗi kích thước đỏ gia cường (mép ngoài khung → tim V → ... → mép ngoài) đo tới TIM V gia cường (giữa bề rộng cánh nằm), vẽ trên hình 2D và 3D. Thanh V gia cường được đặt sao cho tim nằm đúng vị trí (đường tham chiếu lùi legA/2 so với bản 1.1.0).
+- Hình 3D hiện số: P#, độ dài cạnh (cạnh gốc màu cam), chuỗi ô. Nút "Số: bật/tắt".
+- Sửa số trực tiếp trên hình (2D và 3D): bấm đúp số cạnh / số ô để gõ giá trị mới (hoặc chọn rồi F2 / Enter). Bấm nhãn P# để chọn ĐIỂM GỐC: điểm gốc đứng yên, các điểm phía xa dời theo (kéo giãn dọc cạnh, giữ góc); điểm gốc là gốc tọa độ của mặt phẳng khung khi dựng vào Tekla. Hoàn tác bằng nút "Hoàn tác" hoặc Ctrl+Z.
+- Vị trí nẹp (Giữa / Trái / Phải) chỉ áp cho nẹp trên V gia cường; nẹp quanh khung luôn trùng mép ngoài V khung.
+- Cập nhật khung đã chọn là CẬP NHẬT TẠI CHỖ: sửa chính các part cũ (giữ GUID, số hiệu) theo khóa UDA MESHFRAME_KEY (B{i} / S{i} / M), thêm / xóa phần chênh lệch, lưới tạo lại; lỗi thì dựng lại khung mới và xóa khung cũ, không để hai khung đè nhau. Khung tạo từ bản cũ chưa có khóa: part chính được giữ, các part còn lại được tạo lại.

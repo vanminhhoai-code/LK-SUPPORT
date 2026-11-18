@@ -52,15 +52,15 @@ static class PlanTests
 
         // --- thanh gia cường: cùng tiết diện, vuông góc, cánh nằm về +x
         var st = p.Bars.First(b => b.Role == BarRole.Stiffener);
-        Check("gia cuong thang dung tai x=1000", Near(st.Start.X, 1000, 1e-6) && Near(st.End.X, 1000, 1e-6));
+        Check("gia cuong thang: duong tham chieu x=987.5 (tim V = 1000)", Near(st.Start.X, 987.5, 1e-6) && Near(st.End.X, 987.5, 1e-6) && Near(p.StiffTims[0], 1000, 1e-6));
         Check("gia cuong dung o mat trong canh dung V khung (y 2..1198)", Near(Math.Min(st.Start.Y, st.End.Y), 2, 1e-6) && Near(Math.Max(st.Start.Y, st.End.Y), 1198, 1e-6));
         Check("huong Start->End sao cho canh nam (ben trai) ve +x", Near((st.End - st.Start).Unit().Left().X, 1, 1e-9));
         var fr = p.Bars.First(b => b.Role == BarRole.Frame);
         Check("V gia cuong CUNG TIET DIEN V khung", st.Profile == fr.Profile && Near(st.LegA, fr.LegA, 0) && Near(st.LegB, fr.LegB, 0) && Near(st.Thk, fr.Thk, 0));
         Check("moi gia cuong co 2 khuyet; khung khong khuyet", p.Bars.Where(b => b.Role == BarRole.Stiffener).All(b => b.Notches.Count == 2) && p.Bars.Where(b => b.Role == BarRole.Frame).All(b => b.Notches.Count == 0));
         var n0 = st.Notches[0]; var n1 = st.Notches[1];
-        Check("khuyet: x 999..1025, dien tich 26*24 moi cai",
-              n0.All(v => v.X >= 999 - 1e-6 && v.X <= 1025 + 1e-6) && n1.All(v => v.X >= 999 - 1e-6 && v.X <= 1025 + 1e-6) && Near(Area(n0), 26.0 * 24.0, 1e-6) && Near(Area(n1), 26.0 * 24.0, 1e-6));
+        Check("khuyet: x 986.5..1012.5, dien tich 26*24 moi cai",
+              n0.All(v => v.X >= 986.5 - 1e-6 && v.X <= 1012.5 + 1e-6) && n1.All(v => v.X >= 986.5 - 1e-6 && v.X <= 1012.5 + 1e-6) && Near(Area(n0), 26.0 * 24.0, 1e-6) && Near(Area(n1), 26.0 * 24.0, 1e-6));
         Check("hai khuyet: mot o day (y 1..25), mot o tren (y 1175..1199)",
               (Near(n0.Min(v => v.Y), 1, 1e-6) && Near(n0.Max(v => v.Y), 25, 1e-6) && Near(n1.Min(v => v.Y), 1175, 1e-6) && Near(n1.Max(v => v.Y), 1199, 1e-6))
               || (Near(n1.Min(v => v.Y), 1, 1e-6) && Near(n1.Max(v => v.Y), 25, 1e-6) && Near(n0.Min(v => v.Y), 1175, 1e-6) && Near(n0.Max(v => v.Y), 1199, 1e-6)));
@@ -68,12 +68,12 @@ static class PlanTests
         // --- nẹp
         Check("nep chu vi: tim cach mep ngoai w/2 = 12.5", Near(p.Strips[0].Start.Y, 12.5, 1e-6) && Near(p.Strips[0].End.Y, 12.5, 1e-6));
         var ns = p.Strips.First(x => x.OnStiffener);
-        Check("nep gia cuong: tim x = 1000 + 12.5", Near(ns.Start.X, 1012.5, 1e-6) && Near(ns.End.X, 1012.5, 1e-6));
+        Check("nep gia cuong (Giua, rong bang canh V): tim nep = tim V = 1000", Near(ns.Start.X, 1000, 1e-6) && Near(ns.End.X, 1000, 1e-6));
         Check("nep gia cuong dung o mep trong nep chu vi (y 25..1175)", Near(Math.Min(ns.Start.Y, ns.End.Y), 25, 1e-6) && Near(Math.Max(ns.Start.Y, ns.End.Y), 1175, 1e-6));
 
         // --- danh sách ô tùy ý
         p = Plan(new MeshFrameSettings { StiffMode = StiffMode.Custom, StiffCells = "1000 2*1500" }, 4000, 1200, 0);
-        Check("custom 3 o, 2 thanh x=1000,2500", p.Errors.Count == 0 && p.Cells.Count == 3 && Near(p.Bars.Where(b => b.Role == BarRole.Stiffener).Select(b => b.Start.X).Sum(), 3500, 1e-6));
+        Check("custom 3 o, 2 thanh co tim x=1000,2500", p.Errors.Count == 0 && p.Cells.Count == 3 && Near(p.Bars.Where(b => b.Role == BarRole.Stiffener).Select(b => b.Start.X).Sum(), 3475, 1e-6) && Near(p.StiffTims[0], 1000, 1e-6) && Near(p.StiffTims[1], 2500, 1e-6));
         p = Plan(new MeshFrameSettings { StiffMode = StiffMode.Custom, StiffCells = "1000 500" }, 4000, 1200, 0);
         Check("con du them o cuoi + canh bao", p.Cells.Count == 3 && Near(p.Cells[2], 2500, 1e-6) && p.Warnings.Any(w => w.Contains("thêm ô cuối")));
         {
@@ -90,7 +90,7 @@ static class PlanTests
         // --- chọn cạnh gốc
         p = Plan(new MeshFrameSettings { StiffMax = 600, StiffBaseEdge = 2 }, 4000, 1200, 0);     // cạnh 2 = đứng bên phải
         var hs = p.Bars.Last();
-        Check("canh goc 2: 2 o, 1 thanh ngang y=600", p.BaseEdge == 1 && p.Cells.Count == 2 && p.Bars.Count(b => b.Role == BarRole.Stiffener) == 1 && Near(hs.Start.Y, 600, 1e-6) && Near(hs.End.Y, 600, 1e-6));
+        Check("canh goc 2: 2 o, 1 thanh ngang (tim y=600, tham chieu 587.5)", p.BaseEdge == 1 && p.Cells.Count == 2 && p.Bars.Count(b => b.Role == BarRole.Stiffener) == 1 && Near(hs.Start.Y, 587.5, 1e-6) && Near(hs.End.Y, 587.5, 1e-6));
         Check("thanh ngang: canh nam (ben trai) ve +y, 2 khuyet", Near((hs.End - hs.Start).Unit().Left().Y, 1, 1e-9) && hs.Notches.Count == 2);
         Check("canh goc khong ton tai bao loi", Plan(new MeshFrameSettings { StiffBaseEdge = 9 }, 4000, 1200, 0).Errors.Count == 1);
 
@@ -114,8 +114,8 @@ static class PlanTests
         Check("hinh L: gia cuong nam trong khung", p.Bars.Where(b => b.Role == BarRole.Stiffener).All(b => Inside(p.Polygon, (b.Start + b.End) * 0.5)));
         var Ushape = Pts(0, 0, 3000, 0, 3000, 1000, 2000, 1000, 2000, 300, 1000, 300, 1000, 1000, 0, 1000);
         p = MeshFramePlanner.Plan(new MeshFrameSettings { StiffMax = 500, StiffBaseEdge = 2 }, Ushape);
-        var split = p.Bars.Where(b => b.Role == BarRole.Stiffener && Near(b.Start.Y, 500, 1e-6)).ToList();
-        Check("hinh U (lom): duong chia y=500 cat 2 canh -> 2 thanh gia cuong rieng", p.Errors.Count == 0 && split.Count == 2 && split.All(b => b.Notches.Count == 2));
+        var split = p.Bars.Where(b => b.Role == BarRole.Stiffener && Near(b.Start.Y, 487.5, 1e-6)).ToList();
+        Check("hinh U (lom): duong chia tim y=500 cat 2 canh -> 2 thanh gia cuong rieng", p.Errors.Count == 0 && split.Count == 2 && split.All(b => b.Notches.Count == 2));
         Check("hinh U: hai thanh nam hai canh khac nhau", split.Count == 2 && Math.Abs(split[0].Start.X - split[1].Start.X) > 1500);
         Check("diem lom co huong cat vat", p.Bars.Where(b => b.Role == BarRole.Frame).All(b => b.CutStart.HasValue));
         // thứ tự CW được chấp nhận và chuẩn hóa
@@ -166,15 +166,73 @@ static class PlanTests
                 // canh 0 chay theo +X, phia trong = +Y: tim nep = y
                 return (pl.Strips[0].Start.Y + pl.Strips[0].End.Y) / 2;
             };
-            Check("nep Phai: tim cach mep ngoai 10", Near(mid(StripPosKind.Right), 10, 1e-6));
-            Check("nep Giua: tim cach mep ngoai 12.5", Near(mid(StripPosKind.Middle), 12.5, 1e-6));
-            Check("nep Trai: tim cach mep ngoai 15", Near(mid(StripPosKind.Left), 15, 1e-6));
+            Check("nep quanh khung: luon sat mep ngoai V (tim 10), khong phu thuoc Giua/Trai/Phai", Near(mid(StripPosKind.Right), 10, 1e-6) && Near(mid(StripPosKind.Middle), 10, 1e-6) && Near(mid(StripPosKind.Left), 10, 1e-6));
             // gia cuong: nep tren thanh gia cuong theo cung quy tac (huong +u)
             var ps = Plan(new MeshFrameSettings { StripWidth = 20, StripPos = StripPosKind.Left }, 4000, 1200, 0);
             var sb = ps.Bars.First(b => b.Role == BarRole.Stiffener);
             var ss = ps.Strips.First(t => t.OnStiffener);
-            Check("nep gia cuong Trai: tim = duong chia + 15 theo +X", Near((ss.Start.X + ss.End.X) / 2, sb.Start.X + 15, 1e-6));
-            Check("nep rong bang canh V: Giua/Trai/Phai trung nhau", Near(Plan(new MeshFrameSettings { StripPos = StripPosKind.Left }, 4000, 1200, 0).Strips[0].Start.Y, Plan(new MeshFrameSettings { StripPos = StripPosKind.Right }, 4000, 1200, 0).Strips[0].Start.Y, 1e-6));
+            Check("nep gia cuong Trai: tim = duong tham chieu + 15 theo +X", Near((ss.Start.X + ss.End.X) / 2, sb.Start.X + 15, 1e-6));
+            Check("nep gia cuong rong bang canh V: Giua/Trai/Phai trung nhau", Near(Plan(new MeshFrameSettings { StripPos = StripPosKind.Left }, 4000, 1200, 0).Strips.First(t => t.OnStiffener).Start.X, Plan(new MeshFrameSettings { StripPos = StripPosKind.Right }, 4000, 1200, 0).Strips.First(t => t.OnStiffener).Start.X, 1e-6));
+        }
+
+        {
+            // điểm gốc: gốc tọa độ khung đặt tại điểm đó
+            var corners4 = new[] { new V3(100, 200, 5), new V3(4100, 200, 5), new V3(4100, 1400, 5), new V3(100, 1400, 5) };
+            Frame fa; V2[] pa; string ea;
+            Check("diem goc P3: frame origin tai P3, da giac van 4 diem", MeshFrameBuilder.TryFrame(corners4, 2, out fa, out pa, out ea) && Near(fa.Origin.X, 4100, 1e-9) && Near(fa.Origin.Y, 1400, 1e-9) && pa.Length == 4 && Near(pa[2].X, 0, 1e-9) && Near(pa[2].Y, 0, 1e-9));
+            double areaA = Math.Abs(Geo.Area(pa));
+            Check("diem goc khong doi dien tich", Near(areaA, 4000.0 * 1200.0, 1e-6));
+        }
+        p = Plan(new MeshFrameSettings { StiffMode = StiffMode.Custom, StiffCells = "10 1000" }, 4000, 1200, 0);
+        Check("o dau qua hep (tim V sat V khung): canh bao", p.Warnings.Any(w => w.Contains("quá hẹp")));
+
+        // --- số đo trên hình + sửa số thành sửa thật (điểm gốc đứng yên)
+        {
+            var c4 = new[] { new V3(100, 200, 5), new V3(4100, 200, 5), new V3(4100, 1400, 5), new V3(100, 1400, 5) };
+            var stS = new MeshFrameSettings { StiffMax = 1000 };
+            Frame fr0; V2[] pl0; string er0;
+            MeshFrameBuilder.TryFrame(c4, 0, out fr0, out pl0, out er0);
+            var plan0 = MeshFramePlanner.Plan(stS, pl0);
+            var dims = Annotations.Build(plan0);
+            Check("so do: 4 diem + 4 canh + 4 o gia cuong", dims.Count(x => x.Kind == DimKind.Point) == 4 && dims.Count(x => x.Kind == DimKind.Edge) == 4 && dims.Count(x => x.Kind == DimKind.Cell) == 4);
+            Check("so do: canh 1 = 4000, canh goc to dam", dims.First(x => x.Kind == DimKind.Edge && x.Index == 0).Value == 4000 && dims.First(x => x.Kind == DimKind.Edge && x.Index == 0).IsBaseEdge);
+            Check("so do: 4 o deu 1000 (tim -> tim, mep -> tim), tong 4000", dims.Where(x => x.Kind == DimKind.Cell).All(x => Near(x.Value, 1000, 1e-6)));
+            Check("so do: chuoi o xen ke hai muc cao", dims.Where(x => x.Kind == DimKind.Cell).Select(x => x.Level).Distinct().Count() == 2);
+
+            // sửa cạnh 1 từ 4000 thành 3000, điểm gốc P1: P2, P3 dời; P1, P4 đứng yên
+            var r1 = DimEdit.Apply(plan0, fr0, stS, c4, DimKind.Edge, 0, 3000);
+            Check("sua canh 1 -> 3000 (goc P1): hop le", r1.Ok);
+            Check("sua canh 1: P1, P4 dung yen; P2, P3 doi x -1000", r1.Ok && Near(r1.Points[0].X, 100, 1e-9) && Near(r1.Points[3].X, 100, 1e-9) && Near(r1.Points[1].X, 3100, 1e-9) && Near(r1.Points[2].X, 3100, 1e-9) && Near(r1.Points[1].Y, 200, 1e-9));
+            // điểm gốc P3 (nằm ở phía bị dời): nhóm còn lại dời ngược lại, P3 đứng yên
+            var sA = DimEdit.Clone(stS); sA.AnchorPoint = 3;
+            MeshFrameBuilder.TryFrame(c4, 2, out fr0, out pl0, out er0);
+            var planA = MeshFramePlanner.Plan(sA, pl0);
+            var r2 = DimEdit.Apply(planA, fr0, sA, c4, DimKind.Edge, 0, 3000);
+            Check("sua canh 1 -> 3000 (goc P3): P2, P3 dung yen; P1, P4 doi x +1000", r2.Ok && Near(r2.Points[1].X, 4100, 1e-9) && Near(r2.Points[2].X, 4100, 1e-9) && Near(r2.Points[0].X, 1100, 1e-9) && Near(r2.Points[3].X, 1100, 1e-9));
+            // sửa độ dài cạnh đứng (cạnh 2): 1200 -> 1000, các điểm khác không đổi
+            MeshFrameBuilder.TryFrame(c4, 0, out fr0, out pl0, out er0);
+            var r3 = DimEdit.Apply(plan0, fr0, stS, c4, DimKind.Edge, 1, 1000);
+            Check("sua canh 2 -> 1000: P3, P4 doi y -200", r3.Ok && Near(r3.Points[2].Y, 1200, 1e-9) && Near(r3.Points[3].Y, 1200, 1e-9) && Near(r3.Points[1].Y, 200, 1e-9));
+            // sửa ô giữa 1000 -> 1200: ô cuối nhận phần dư, chế độ chuyển sang nhập từng ô
+            var r4 = DimEdit.Apply(plan0, fr0, stS, c4, DimKind.Cell, 1, 1200);
+            var p4 = r4.Ok ? MeshFramePlanner.Plan(r4.Settings, pl0) : null;
+            Check("sua o 2 -> 1200: o cuoi con 800, chuyen sang nhap tung o, khung khong doi", r4.Ok && r4.Settings.StiffMode == StiffMode.Custom && p4.Cells.Count == 4 && Near(p4.Cells[1], 1200, 1e-6) && Near(p4.Cells[3], 800, 1e-6) && Near(r4.Points[1].X, 4100, 1e-9));
+            // sửa ô cuối 1000 -> 1500: khung dài ra 500, P2, P3 dời +500, các tim cũ giữ nguyên
+            var r5 = DimEdit.Apply(plan0, fr0, stS, c4, DimKind.Cell, 3, 1500);
+            var f5 = MeshFrameBuilder.TryFrame(r5.Points, 0, out fr0, out pl0, out er0);
+            var p5 = MeshFramePlanner.Plan(r5.Settings, pl0);
+            Check("sua o cuoi -> 1500: khung dai 4500, tim V giu 1000/2000/3000", r5.Ok && Near(r5.Points[1].X, 4600, 1e-9) && Near(r5.Points[0].X, 100, 1e-9) && Near(p5.StiffTims[0], 1000, 1e-6) && Near(p5.StiffTims[2], 3000, 1e-6) && Near(p5.BaseMax - p5.BaseMin, 4500, 1e-6));
+            MeshFrameBuilder.TryFrame(c4, 0, out fr0, out pl0, out er0);
+            Check("sua o: o vuot khung bao loi ro", !DimEdit.Apply(plan0, fr0, stS, c4, DimKind.Cell, 1, 3500).Ok);
+            Check("sua so am bao loi", !DimEdit.Apply(plan0, fr0, stS, c4, DimKind.Edge, 0, -5).Ok);
+            // chữ U: sửa độ dài cạnh đáy vẫn hợp lệ và giữ góc
+            var cu = new[] { new V3(0, 0, 0), new V3(3000, 0, 0), new V3(3000, 1000, 0), new V3(2000, 1000, 0), new V3(2000, 300, 0), new V3(1000, 300, 0), new V3(1000, 1000, 0), new V3(0, 1000, 0) };
+            Frame fu; V2[] pu2; string eu;
+            MeshFrameBuilder.TryFrame(cu, 0, out fu, out pu2, out eu);
+            var su = new MeshFrameSettings { StiffMode = StiffMode.None };
+            var planU = MeshFramePlanner.Plan(su, pu2);
+            var ru = DimEdit.Apply(planU, fu, su, cu, DimKind.Edge, 0, 3600);
+            Check("chu U: sua day 3000 -> 3600: chi cac diem o dau canh (P2, P3) doi +600, cac diem con lai dung yen, U van hop le", ru.Ok && Near(ru.Points[1].X, 3600, 1e-9) && Near(ru.Points[2].X, 3600, 1e-9) && Near(ru.Points[3].X, 2000, 1e-9) && Near(ru.Points[5].X, 1000, 1e-9) && Near(ru.Points[0].X, 0, 1e-9));
         }
 
         // --- mô hình 3D thật (tiết diện L, cắt vát, khuyết)
@@ -222,7 +280,7 @@ static class PlanTests
         p = Plan(new MeshFrameSettings { VLegA = 30, VLegB = 30, VThk = 2.5, StripWidth = 30, StripThk = 2 }, 4000, 1200, 0);
         Check("V 30x30x2.5: khung + gia cuong cung tiet dien", p.Bars.All(b => b.Profile == "L30*30*2.5"));
         Check("nep tuy y 30x2", p.Strips.All(x => Near(x.Width, 30, 0) && Near(x.Thk, 2, 0) && Near(x.ZRef, -0.74, 1e-9)));
-        Check("khuyet theo canh 30: x toi da 1030", Near(p.Bars.First(b => b.Role == BarRole.Stiffener).Notches[0].Max(v => v.X), 1030, 1e-6));
+        Check("khuyet theo canh 30: x toi da 1015 (tham chieu 985 + 30)", Near(p.Bars.First(b => b.Role == BarRole.Stiffener).Notches[0].Max(v => v.X), 1015, 1e-6));
 
         // --- profile ghi đè, hướng đặt, kiểu lưới, cảnh báo chữ có dấu
         p = Plan(new MeshFrameSettings { VProfile = "L50x50x3", StripProfile = "PL3*30" }, 4000, 1200, 0);

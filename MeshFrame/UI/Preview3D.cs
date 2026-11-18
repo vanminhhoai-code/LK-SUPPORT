@@ -25,6 +25,7 @@ namespace MeshFrame.UI
         // chuột
         private Point _last; private bool _pan, _rot;
         private readonly List<KeyValuePair<Rectangle, string>> _buttons = new List<KeyValuePair<Rectangle, string>>();
+        public readonly DimLayer Dims;
 
         public Color BackgroundTop = Color.FromArgb(27, 28, 32), BackgroundBottom = Color.FromArgb(42, 45, 51), TextColor = Color.FromArgb(200, 204, 212);
         public Color FrameColor = Color.FromArgb(86, 156, 214), StiffColor = Color.FromArgb(78, 201, 176), StripColor = Color.FromArgb(230, 170, 60), MeshColor = Color.FromArgb(120, 130, 150);
@@ -34,7 +35,10 @@ namespace MeshFrame.UI
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
             BackColor = BackgroundTop;
             TabStop = true;
+            Dims = new DimLayer(this);
         }
+
+        public void SetDims(List<DimItem> items, int anchor) { Dims.SetItems(items, anchor); Invalidate(); }
 
         public void Show(MeshFramePlan plan, V2[] poly)
         {
@@ -58,6 +62,7 @@ namespace MeshFrame.UI
                 foreach (V2 v in p.Poly) { x0 = Math.Min(x0, v.X); x1 = Math.Max(x1, v.X); y0 = Math.Min(y0, v.Y); y1 = Math.Max(y1, v.Y); }
                 z0 = Math.Min(z0, p.Z0); z1 = Math.Max(z1, p.Z1);
             }
+            foreach (DimItem d in Dims.Items) foreach (V2 v in new[] { d.A, d.B, d.TextPos }) { x0 = Math.Min(x0, v.X); x1 = Math.Max(x1, v.X); y0 = Math.Min(y0, v.Y); y1 = Math.Max(y1, v.Y); }
             _cx = (x0 + x1) / 2; _cy = (y0 + y1) / 2; _cz = (z0 + z1) / 2;
         }
 
@@ -74,6 +79,12 @@ namespace MeshFrame.UI
                         double sx, sy, d; Project(v.X, v.Y, z, out sx, out sy, out d);
                         minx = Math.Min(minx, sx); maxx = Math.Max(maxx, sx); miny = Math.Min(miny, sy); maxy = Math.Max(maxy, sy);
                     }
+            foreach (DimItem d in Dims.Items)
+                foreach (V2 v in new[] { d.A, d.B })
+                {
+                    double sx, sy, dd; Project(v.X, v.Y, 0, out sx, out sy, out dd);
+                    minx = Math.Min(minx, sx); maxx = Math.Max(maxx, sx); miny = Math.Min(miny, sy); maxy = Math.Max(maxy, sy);
+                }
             double bw = Math.Max(maxx - minx, 1e-6), bh = Math.Max(maxy - miny, 1e-6);
             _scale = 0.88 * Math.Min(Width / bw, (Height - 20) / bh);
             double mx = (minx + maxx) / 2, my = (miny + maxy) / 2;       // đo ở scale = 1 quanh tâm màn hình
@@ -101,6 +112,7 @@ namespace MeshFrame.UI
         {
             base.OnMouseDown(e);
             _last = e.Location;
+            if (e.Button == MouseButtons.Left && Dims.MouseDown(e.Location)) return;
             if (e.Button == MouseButtons.Middle)
             {
                 if ((ModifierKeys & Keys.Control) == Keys.Control) { _rot = true; _pan = false; } else { _pan = true; _rot = false; }
@@ -151,10 +163,13 @@ namespace MeshFrame.UI
             else if (id == "Top") SetView(0, 0);
             else if (id == "Under") SetView(0, 180);
             else if (id == "Fit") { FitView(); Invalidate(); }
+            else if (id == "Num") { Dims.Visible = !Dims.Visible; Invalidate(); }
         }
 
+        protected override void OnDoubleClick(EventArgs e) { base.OnDoubleClick(e); Dims.DoubleClick(PointToClient(Cursor.Position)); }
+
         protected override bool IsInputKey(Keys k) { return k == Keys.Home || base.IsInputKey(k); }
-        protected override void OnKeyDown(KeyEventArgs e) { base.OnKeyDown(e); if (e.KeyCode == Keys.Home) { SetView(-35, 48); } }
+        protected override void OnKeyDown(KeyEventArgs e) { base.OnKeyDown(e); if (Dims.KeyDown(e.KeyCode)) return; if (e.KeyCode == Keys.Home) { SetView(-35, 48); } }
 
         // ---------------------------------------------------------------- vẽ
         protected override void OnPaint(PaintEventArgs e)
@@ -169,6 +184,8 @@ namespace MeshFrame.UI
             if (Width < 8 || Height < 8) return;
             Render();
             g.DrawImageUnscaled(_bmp, 0, 0);
+            Dims.Back = BackgroundTop; Dims.TextColor = TextColor;
+            Dims.Draw(g, v => { Pt q = P3(v.X, v.Y, 0); return new PointF((float)q.X, (float)q.Y); });
             DrawOverlay(g);
         }
 
@@ -346,7 +363,7 @@ namespace MeshFrame.UI
         private void DrawOverlay(Graphics g)
         {
             _buttons.Clear();
-            string[][] defs = { new[] { "3D", "3D" }, new[] { "Top", "Trên" }, new[] { "Under", "Dưới" }, new[] { "Fit", "Vừa khung" } };
+            string[][] defs = { new[] { "3D", "3D" }, new[] { "Top", "Trên" }, new[] { "Under", "Dưới" }, new[] { "Fit", "Vừa khung" }, new[] { "Num", Dims.Visible ? "Số: bật" : "Số: tắt" } };
             int x = Width - 8;
             using (var f = new Font(Font.FontFamily, 8.5f))
             using (var br = new SolidBrush(Color.FromArgb(200, 42, 45, 51)))
@@ -362,7 +379,7 @@ namespace MeshFrame.UI
                     _buttons.Add(new KeyValuePair<Rectangle, string>(r, defs[i][0]));
                     x = r.X - 6;
                 }
-                g.DrawString("Cuộn: zoom · Giữ chuột giữa: kéo · Ctrl + chuột giữa: xoay", f, tb, 8, Height - 20);
+                g.DrawString("Cuộn: zoom · Giữ chuột giữa: kéo · Ctrl + chuột giữa: xoay · Bấm đúp số: sửa · Bấm P#: chọn điểm gốc", f, tb, 8, Height - 20);
                 DrawAxes(g, f);
             }
         }

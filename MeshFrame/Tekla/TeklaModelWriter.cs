@@ -30,6 +30,13 @@ namespace MeshFrame.Tekla
         /// <summary>Part chính (V khung đầu tiên) của khung vừa tạo; null nếu chưa tạo.</summary>
         public object MainPart { get; private set; }
 
+        /// <summary>Part chính của khung cũ cần CẬP NHẬT TẠI CHỖ: part nào còn tương ứng thì sửa chính part đó (giữ GUID, số hiệu), thiếu thì thêm, thừa thì xóa.</summary>
+        public object ReuseMain;
+        private Dictionary<string, object> _old;
+        private readonly List<object> _oldLeft = new List<object>();
+        private readonly HashSet<object> _reused = new HashSet<object>();
+        private int _updated, _added;
+
         /// <param name="model">Đối tượng Tekla.Structures.Model.Model đã có (Cover Tool: model của gateway); null = tạo mới.</param>
         public TeklaModelWriter(TeklaApi api, object model)
         {
@@ -40,7 +47,7 @@ namespace MeshFrame.Tekla
         public void Write(MeshFramePlan plan, Frame f)
         {
             P = plan.Placement;
-            _created.Clear();
+            _created.Clear(); _reused.Clear(); _oldLeft.Clear(); _old = null; _updated = 0; _added = 0;
             MainPart = null;
             object wph = A.Call(_model, "GetWorkPlaneHandler");
             object old = A.Call(wph, "GetCurrentTransformationPlane");
@@ -53,13 +60,14 @@ namespace MeshFrame.Tekla
 
                 _vCal = null; _sCal = null;
                 if (P.AutoPlacement) Calibrate(plan);
+                if (ReuseMain != null) CollectOld();
 
                 var bars = new List<object>();
                 var strips = new List<object>();
                 try
                 {
-                    foreach (PlanBar b in plan.Bars) bars.Add(InsertBar(b));
-                    foreach (PlanStrip s in plan.Strips) strips.Add(InsertStrip(s));
+                    for (int i = 0; i < plan.Bars.Count; i++) bars.Add(InsertBar(plan.Bars[i], "B" + i));
+                    for (int i = 0; i < plan.Strips.Count; i++) strips.Add(InsertStrip(plan.Strips[i], "S" + i));
                 }
                 catch (Exception)
                 {
@@ -68,12 +76,14 @@ namespace MeshFrame.Tekla
                 }
                 if (bars.Count == 0) return;
                 MainPart = bars[0];
+                int removed = 0;
+                if (ReuseMain != null) removed = RemoveLeftovers();
                 if (P.AutoPlacement) Verify(plan, bars, strips);       // đo lại trên CHÍNH các thanh vừa tạo, dời nếu lệch
 
                 object meshPart = null;
                 if (plan.Mesh != null)
                 {
-                    try { meshPart = InsertMesh(plan.Mesh, bars[0], plan.Polygon); }
+                    try { meshPart = InsertMesh(plan.Mesh, bars[0], plan.Polygon); if (meshPart != null) TeklaFrameStore.WriteKey(A, meshPart, "M"); }
                     catch (Exception ex) { Messages.Add("Lưới không tạo được: " + Root(ex).Message + ". Các phần khác vẫn được tạo."); }
                 }
 
@@ -81,8 +91,8 @@ namespace MeshFrame.Tekla
                 try
                 {
                     object asm = A.Call(bars[0], "GetAssembly");
-                    for (int i = 1; i < bars.Count; i++) A.Call(asm, "Add", bars[i]);
-                    foreach (object sp in strips) A.Call(asm, "Add", sp);
+                    for (int i = 1; i < bars.Count; i++) if (!_reused.Contains(bars[i])) A.Call(asm, "Add", bars[i]);
+                    foreach (object sp in strips) if (!_reused.Contains(sp)) A.Call(asm, "Add", sp);
                     if (meshPart != null) A.Call(asm, "Add", meshPart);        // lưới dạng tấm là part; RebarMesh thuộc part cha
                     object num = A.Get(asm, "AssemblyNumber");
                     A.Set(num, "Prefix", plan.AsmPrefix);
@@ -91,6 +101,8 @@ namespace MeshFrame.Tekla
                 }
                 catch (Exception ex) { Messages.Add("Chưa gộp được assembly: " + Root(ex).Message); }
 
+                if (ReuseMain != null)
+                    Notes.Add("Cập nhật tại chỗ: sửa " + _updated + " part, thêm " + _added + ", xóa " + removed + " (lưới được tạo lại). Số hiệu và GUID của part được sửa giữ nguyên.");
                 if (!string.IsNullOrEmpty(FrameId))
                 {
                     try { TeklaFrameStore.WriteId(A, bars[0], FrameId); }
@@ -117,34 +129,90 @@ namespace MeshFrame.Tekla
         /// <summary>Đặt V trong Tekla. Tự canh (mặc định): xoay + lệch đã ĐO từ hình khối thật Tekla tạo ra, nên cánh nằm luôn ở dưới,
         /// cánh đứng ở mép ngoài hướng lên, đúng chiều bất kể quy ước On plane/Rotation/At depth của bản Tekla.
         /// Không tự canh: dùng các ô On plane/Rotation/At depth (Middle thì đặt theo tim) + lệch người dùng.</summary>
-        private object InsertBar(PlanBar bar)
+        // ------------------------------------------------------------------ cập nhật tại chỗ
+        private static bool IsBeam(object o) { return o != null && o.GetType().Name == "Beam"; }
+
+        /// <summary>Lập bảng khóa -> part của khung cũ (khóa B{i} / S{i} / M lưu trong UDA). Part chính cũ không có khóa thì coi là B0.</summary>
+        private void CollectOld()
+        {
+            _old = new Dictionary<string, object>();
+            object asm = A.Call(ReuseMain, "GetAssembly");
+            var parts = new List<object>();
+            parts.Add(ReuseMain);
+            IEnumerable secs = asm == null ? null : A.Call(asm, "GetSecondaries") as IEnumerable;
+            if (secs != null) foreach (object o in secs) parts.Add(o);
+            foreach (object p in parts)
+            {
+                string key = TeklaFrameStore.ReadKey(A, p);
+                if (key.Length == 0 && ReferenceEquals(p, ReuseMain)) key = "B0";
+                if (key.Length > 0 && !_old.ContainsKey(key)) _old[key] = p; else _oldLeft.Add(p);
+            }
+        }
+
+        /// <summary>Part cũ không còn trong kế hoạch + lưới cũ bị xóa (lưới tạo lại). Trả về số part đã xóa.</summary>
+        private int RemoveLeftovers()
+        {
+            int n = 0;
+            var all = new List<object>(_old.Values); all.AddRange(_oldLeft);
+            TeklaFrameStore.DeleteReinforcements(A, ReuseMain);
+            foreach (object o in all)
+            {
+                try { TeklaFrameStore.DeleteReinforcements(A, o); A.Call(o, "Delete"); n++; }
+                catch (Exception ex) { Messages.Add("Không xóa được part thừa của khung cũ: " + Root(ex).Message); }
+            }
+            _old.Clear(); _oldLeft.Clear();
+            return n;
+        }
+
+        /// <summary>Lấy part cũ cùng khóa để sửa (xóa các vết cắt cũ của nó, đặt lại điểm đầu / cuối), hoặc null nếu phải tạo mới.</summary>
+        private object TakeOld(string key, V2 a, V2 b, double z)
+        {
+            object old;
+            if (_old == null || !_old.TryGetValue(key, out old) || !IsBeam(old)) return null;
+            _old.Remove(key);
+            var cuts = new List<object>();
+            object en = A.Call(old, "GetBooleans");
+            while (en != null && (bool)A.Call(en, "MoveNext")) cuts.Add(A.Get(en, "Current"));
+            foreach (object c in cuts) A.Call(c, "Delete");
+            A.Set(old, "StartPoint", A.Point(a.X, a.Y, z));
+            A.Set(old, "EndPoint", A.Point(b.X, b.Y, z));
+            return old;
+        }
+
+        private void Commit(object beam, object old, string what, string key)
+        {
+            if (old != null) { A.Require(beam, "Modify", "cập nhật " + what); _reused.Add(beam); _updated++; }
+            else { A.Require(beam, "Insert", what); _created.Add(beam); TeklaFrameStore.WriteKey(A, beam, key); _added++; }
+        }
+
+        private object InsertBar(PlanBar bar, string key)
         {
             V2 n = (bar.End - bar.Start).Unit().Left();                       // phía cánh nằm (vào trong khung)
             string plane = P.VPlane, rot = P.VRotation, depth = P.VDepth;
             double lat, dz;
             if (_vCal != null) { plane = "MIDDLE"; depth = "MIDDLE"; rot = _vCal.Rotation; lat = _vCal.Lat + P.VLateral; dz = _vCal.Z; }
             else { lat = (P.VPlane == "MIDDLE" ? bar.LegA / 2 : 0) + P.VLateral; dz = P.VDepth == "MIDDLE" ? bar.LegB / 2 : 0; }
-            object beam = NewBeam(bar.Start + n * lat, bar.End + n * lat, bar.ZRef + dz);
+            object old = TakeOld(key, bar.Start + n * lat, bar.End + n * lat, bar.ZRef + dz);
+            object beam = old ?? NewBeam(bar.Start + n * lat, bar.End + n * lat, bar.ZRef + dz);
             Describe(beam, bar.Profile, bar.Material, bar.Name, bar.Class, bar.Prefix, bar.StartNo, plane, rot, depth);
-            A.Require(beam, "Insert", "thanh " + bar.Profile + " (kiểm tra profile trong catalog)");
-            _created.Add(beam);
+            Commit(beam, old, "thanh " + bar.Profile + " (kiểm tra profile trong catalog)", key);
             AddMiter(beam, bar.Start, bar.CutStart);
             AddMiter(beam, bar.End, bar.CutEnd);
             foreach (V2[] notch in bar.Notches) AddNotch(beam, notch, bar.Thk, bar.Material);
             return beam;
         }
 
-        private object InsertStrip(PlanStrip st)
+        private object InsertStrip(PlanStrip st, string key)
         {
             V2 n = (st.End - st.Start).Unit().Left();
             string plane = P.StripPlane, rot = P.StripRotation, depth = P.StripDepth;
             double lat, dz;
             if (_sCal != null) { plane = "MIDDLE"; depth = "MIDDLE"; rot = _sCal.Rotation; lat = _sCal.Lat + P.StripLateral; dz = _sCal.Z; }
             else { lat = P.StripLateral; dz = P.StripDepth == "MIDDLE" ? -st.Thk / 2 : 0; }   // nẹp nằm phía ngoài (-Z) mặt tiếp xúc lưới
-            object beam = NewBeam(st.Start + n * lat, st.End + n * lat, st.ZRef + dz);
+            object old = TakeOld(key, st.Start + n * lat, st.End + n * lat, st.ZRef + dz);
+            object beam = old ?? NewBeam(st.Start + n * lat, st.End + n * lat, st.ZRef + dz);
             Describe(beam, st.Profile, st.Material, st.Name, st.Class, st.Prefix, st.StartNo, plane, rot, depth);
-            A.Require(beam, "Insert", "nẹp " + st.Profile + " (kiểm tra profile trong catalog)");
-            _created.Add(beam);
+            Commit(beam, old, "nẹp " + st.Profile + " (kiểm tra profile trong catalog)", key);
             AddMiter(beam, st.Start, st.CutStart);
             AddMiter(beam, st.End, st.CutEnd);
             return beam;

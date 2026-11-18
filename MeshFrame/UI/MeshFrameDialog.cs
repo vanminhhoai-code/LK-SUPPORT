@@ -41,6 +41,10 @@ namespace MeshFrame.UI
         private readonly DataGridView _grid = new DataGridView();
         private Button _btnCreate, _btnRepick, _btnEdit, _btnDeletePoint;
         private bool _loading;
+        private readonly Label _hint = new Label { Dock = DockStyle.Top, Height = 22, Padding = new Padding(6, 3, 0, 0), Text = "" };
+        private readonly Timer _hintTimer = new Timer { Interval = 7000 };
+        private Button _btnUndo;
+        private readonly Stack<KeyValuePair<V3[], MeshFrameSettings>> _undo = new Stack<KeyValuePair<V3[], MeshFrameSettings>>();
         private V3[] _points = new V3[0];
         private string _editingId;
         private string[][] _rebarCatalog;
@@ -78,7 +82,7 @@ namespace MeshFrame.UI
         public V3[] Points
         {
             get { return _points; }
-            set { _points = value ?? new V3[0]; RefreshGrid(); Changed(); }
+            set { _points = value ?? new V3[0]; _s.AnchorPoint = 1; _undo.Clear(); UpdateUndo(); RefreshGrid(); Changed(); }   // điểm mới: điểm gốc về P1
         }
 
         /// <summary>Mã khung đang sửa (null = tạo khung mới).</summary>
@@ -132,8 +136,15 @@ namespace MeshFrame.UI
             BuildGrid(gridPanel);
             right.Controls.Add(_preview);
             right.Controls.Add(_preview3d);
+            right.Controls.Add(_hint);
             right.Controls.Add(_header);
             _header.Controls.Add(_chk2d);
+            _btnUndo = new Button { Text = "↶ Hoàn tác", Dock = DockStyle.Right, Width = 100, Enabled = false };
+            _btnUndo.Click += delegate { DoUndo(); };
+            _header.Controls.Add(_btnUndo);
+            _hintTimer.Tick += delegate { _hintTimer.Stop(); _hint.Text = ""; };
+            foreach (Preview3D pv3 in new[] { _preview3d }) { pv3.Dims.Edited += OnDimEdited; pv3.Dims.AnchorPicked += OnAnchorPicked; }
+            _preview.Dims.Edited += OnDimEdited; _preview.Dims.AnchorPicked += OnAnchorPicked;
             _chk2d.CheckedChanged += delegate { _preview.Visible = _chk2d.Checked; _preview3d.Visible = !_chk2d.Checked; };
             right.Controls.Add(gridPanel);
             right.Controls.Add(_status);
@@ -181,7 +192,8 @@ namespace MeshFrame.UI
             _pill.Font = UiFonts.Semi(9.5f); StylePill(_pill.Text.IndexOf("Đã kết nối") >= 0);
             _header.ForeColor = UiTheme.Text; _header.Font = UiFonts.Semi(9.5f);
             _status.BackColor = UiTheme.FieldInput; _status.ForeColor = UiTheme.Text;
-            _preview3d.TextColor = UiTheme.Text;
+            _preview3d.TextColor = UiTheme.Text; _hint.ForeColor = UiTheme.InfoText;
+            _preview3d.Dims.Back = UiTheme.Bg;
         }
 
         // ------------------------------------------------------------ các tab
@@ -207,7 +219,7 @@ namespace MeshFrame.UI
         private TabPage TabStiff()
         {
             var t = NewPage("Gia cường");
-            Note(t, "V gia cường CÙNG TIẾT DIỆN V khung, vuông góc với CẠNH GỐC, hai đầu cắt khuyết cánh nằm cho khớp V khung. Các ô đo dọc cạnh gốc. Lưới kéo căng liên tục; nẹp PL đi theo từng thanh.");
+            Note(t, "V gia cường CÙNG TIẾT DIỆN V khung, vuông góc với CẠNH GỐC, hai đầu cắt khuyết cánh nằm cho khớp V khung. Các ô đo dọc cạnh gốc, tính tới TIM V gia cường (giữa bề rộng cánh nằm): ô đầu = mép ngoài khung → tim, ô giữa = tim → tim, ô cuối = tim → mép ngoài khung đối diện. Bấm đúp số đỏ trên hình để sửa. Lưới kéo căng liên tục; nẹp PL đi theo từng thanh.");
             Row(t, "StiffMode", "Chia ô", "Không gia cường", "Chia đều (mỗi ô tối đa)", "Nhập từng ô");
             Row(t, "StiffBaseEdge", "Cạnh gốc (0 = tự chọn cạnh dài nhất)");
             Row(t, "StiffMax", "Mỗi ô tối đa (mm)");
@@ -247,7 +259,7 @@ namespace MeshFrame.UI
             Row(t, "UseStrip", "Có nẹp");
             Note(t, "Nẹp PL nằm phía ngoài, ép lưới vào cánh nằm V (chuẩn PL-25x1.2, rộng bằng cánh V); chạy quanh khung và theo các thanh gia cường.");
             Row(t, "StripPos", "Vị trí nẹp so với V", "Giữa V (giữa cánh nằm)", "Trái V (sát đầu cánh nằm, phía trong)", "Phải V (sát cánh đứng, phía ngoài)");
-            Note(t, "Giữa / Trái / Phải tính theo bề rộng cánh nằm V: Phải = mép nẹp sát cánh đứng, Trái = mép nẹp trùng đầu cánh nằm. Nẹp rộng bằng cánh V thì ba vị trí trùng nhau. Áp cho nẹp quanh khung và nẹp trên gia cường.");
+            Note(t, "Giữa / Trái / Phải tính theo bề rộng cánh nằm V: Phải = mép nẹp sát cánh đứng, Trái = mép nẹp trùng đầu cánh nằm. Nẹp rộng bằng cánh V thì ba vị trí trùng nhau. CHỈ áp cho nẹp trên V gia cường; nẹp quanh khung luôn có mép ngoài trùng mép ngoài V khung.");
             Row(t, "StripWidth", "Bề rộng nẹp (mm)");
             Row(t, "StripThk", "Độ dày nẹp (mm)");
             Row(t, "StripMaterial", "Vật liệu");
@@ -355,6 +367,60 @@ namespace MeshFrame.UI
             _points[row] = new V3(col == 1 ? v : p.X, col == 2 ? v : p.Y, col == 3 ? v : p.Z);
             RefreshGrid();
             Changed();
+        }
+
+        // ------------------------------------------------------------ sửa số trên hình
+        private void Hint(string text, bool error)
+        {
+            _hint.ForeColor = error ? UiTheme.ErrText : UiTheme.OkText;
+            _hint.Text = (error ? "✖ " : "✔ ") + text;
+            _hintTimer.Stop(); _hintTimer.Start();
+        }
+
+        private void PushUndo()
+        {
+            Read();
+            _undo.Push(new KeyValuePair<V3[], MeshFrameSettings>((V3[])_points.Clone(), DimEdit.Clone(_s)));
+            while (_undo.Count > 60) { var arr = _undo.ToArray(); _undo.Clear(); for (int i = 59; i >= 0; i--) _undo.Push(arr[i]); }
+            UpdateUndo();
+        }
+
+        private void UpdateUndo() { if (_btnUndo != null) _btnUndo.Enabled = _undo.Count > 0; }
+
+        private void DoUndo()
+        {
+            if (_undo.Count == 0) return;
+            var snap = _undo.Pop();
+            _points = snap.Key; Settings = snap.Value; RefreshGrid(); Changed(); UpdateUndo();
+            Hint("Đã hoàn tác.", false);
+        }
+
+        private void OnAnchorPicked(int index)
+        {
+            if (index < 0 || index >= _points.Length || _s.AnchorPoint == index + 1) return;
+            PushUndo();
+            _s.AnchorPoint = index + 1;
+            Changed();
+            Hint("Điểm gốc: P" + (index + 1) + " (đứng yên khi sửa số; là gốc tọa độ khi dựng vào Tekla).", false);
+        }
+
+        private void OnDimEdited(DimItem item, double value)
+        {
+            Read();
+            Frame f; V2[] poly; string err;
+            if (_points.Length < 3 || !MeshFrameBuilder.TryFrame(_points, _s.AnchorPoint - 1, out f, out poly, out err)) { Hint("Chưa có khung hợp lệ để sửa số.", true); return; }
+            MeshFramePlan plan = MeshFramePlanner.Plan(_s, poly);
+            EditResult r = DimEdit.Apply(plan, f, _s, _points, item.Kind, item.Index, value);
+            if (!r.Ok) { Hint("Không sửa được: " + r.Error, true); return; }
+            PushUndo();
+            _points = r.Points; Settings = r.Settings; RefreshGrid(); Changed();
+            Hint("Đã sửa " + (item.Kind == DimKind.Edge ? "cạnh " + (item.Index + 1) : "ô " + (item.Index + 1)) + " thành " + value.ToString("0.##", CultureInfo.InvariantCulture) + " mm (điểm gốc P" + _s.AnchorPoint + " đứng yên).", false);
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == (Keys.Control | Keys.Z) && !(ActiveControl is TextBoxBase) && !(ActiveControl is ComboBox)) { DoUndo(); return true; }
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         // ------------------------------------------------------------ hành động
@@ -480,8 +546,8 @@ namespace MeshFrame.UI
         {
             if (_btnCreate == null) return;
             bool editing = _editingId != null;
-            _btnCreate.Text = editing ? "Cập nhật khung trong Tekla (thay khung cũ)" : "Tạo khung trong Tekla";
-            _btnCreate.Width = editing ? 300 : 190;
+            _btnCreate.Text = editing ? "Cập nhật khung đã chọn (sửa tại chỗ)" : "Tạo khung trong Tekla";
+            _btnCreate.Width = editing ? 270 : 190;
             MeshFramePlan plan = CurrentPlan();
             _btnCreate.Enabled = plan != null && plan.Errors.Count == 0 && CreateHandler != null;
             _btnDeletePoint.Enabled = _points.Length > 3;
@@ -491,17 +557,17 @@ namespace MeshFrame.UI
         private MeshFramePlan CurrentPlan()
         {
             Frame f; V2[] poly; string err;
-            if (_points.Length < 3 || !MeshFrameBuilder.TryFrame(_points, out f, out poly, out err)) return null;
+            if (_points.Length < 3 || !MeshFrameBuilder.TryFrame(_points, _s.AnchorPoint - 1, out f, out poly, out err)) return null;
             return MeshFramePlanner.Plan(_s, poly);
         }
 
         private void UpdatePreview()
         {
             Frame f; V2[] poly; string err = null;
-            bool framed = _points.Length >= 3 && MeshFrameBuilder.TryFrame(_points, out f, out poly, out err);
+            bool framed = _points.Length >= 3 && MeshFrameBuilder.TryFrame(_points, _s.AnchorPoint - 1, out f, out poly, out err);
             if (_points.Length < 3)
             {
-                _preview.ShowEmpty(null); _preview3d.ShowEmpty(null);
+                _preview.SetDims(null, 0); _preview3d.SetDims(null, 0); _preview.ShowEmpty(null); _preview3d.ShowEmpty(null);
                 _header.Text = _points.Length == 0 ? "Chưa có điểm" : "Mới có " + _points.Length + " điểm, cần ít nhất 3";
                 SetStatus(new List<string>(), new List<string> { "Chưa đủ điểm: bấm \"Pick lại điểm\" để pick đa giác trong Tekla." }, new List<string>(), null);
                 return;
@@ -513,14 +579,16 @@ namespace MeshFrame.UI
                 SetStatus(new List<string> { err }, new List<string>(), new List<string>(), null);
                 return;
             }
-            MeshFrameBuilder.TryFrame(_points, out f, out poly, out err);
+            MeshFrameBuilder.TryFrame(_points, _s.AnchorPoint - 1, out f, out poly, out err);
             MeshFramePlan plan = MeshFramePlanner.Plan(_s, poly);
+            List<DimItem> dims = plan.Errors.Count == 0 ? Annotations.Build(plan) : new List<DimItem>();
+            _preview.SetDims(dims, _s.AnchorPoint - 1); _preview3d.SetDims(dims, _s.AnchorPoint - 1);
             _preview.Show(plan.Errors.Count == 0 ? plan : null, poly, _s.VLegA);
             if (plan.Errors.Count == 0) _preview3d.Show(plan, poly); else _preview3d.ShowEmpty("Có lỗi nhập liệu: xem phần trạng thái bên dưới.");
 
             double per = 0; for (int i = 0; i < _points.Length; i++) per += (_points[(i + 1) % _points.Length] - _points[i]).Length;
             double area = plan.Polygon != null ? Math.Abs(Geo.Area(plan.Polygon)) / 1e6 : 0;
-            _header.Text = _points.Length + " điểm · chu vi " + F(per) + " mm · diện tích " + area.ToString("0.###", CultureInfo.InvariantCulture) + " m²"
+            _header.Text = _points.Length + " điểm · gốc P" + _s.AnchorPoint + " · chu vi " + F(per) + " mm · diện tích " + area.ToString("0.###", CultureInfo.InvariantCulture) + " m²"
                            + (_editingId != null ? "   —   ĐANG SỬA KHUNG " + _editingId.Substring(0, Math.Min(8, _editingId.Length)) : "");
 
             int stiff = 0; foreach (PlanBar b in plan.Bars) if (b.Role == BarRole.Stiffener) stiff++;
