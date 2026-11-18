@@ -1,0 +1,6 @@
+MeshFrame v19 / 1.2.8
+Chạy Start-Tekla21.1.bat hoặc Start-Tekla2020.bat tương ứng model đang mở.
+Ctrl+Z hoặc nút Hoàn tác: khôi phục điểm vừa xóa, tọa độ vừa sửa, sửa cạnh và khoảng gia cường trong app. Hỗ trợ 60 bước. Khi đang nhập văn bản thông số, Ctrl+Z ưu tiên hoàn tác chữ đang nhập.
+Lịch sử này dành cho bản thiết kế trong app trước khi cập nhật model; không thay cho Undo của Tekla và không phục hồi thao tác model đã commit.
+Kiểm tra WinForms trên EXE v19: 8/8 kiểm tra Undo và 44/44 kiểm tra hồi quy đạt. Không tuyên bố đã thao tác trên cửa sổ app người dùng đang mở.
+Giữ các chức năng v18: Theo Tekla lấy hướng view được chọn; chuột giữa kéo, Ctrl+chuột giữa xoay, cuộn zoom; 2D zoom/pan; lưới theo bước ô/đường kính thiết kế.
