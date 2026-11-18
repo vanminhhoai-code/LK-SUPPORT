@@ -18,6 +18,11 @@ namespace MeshFrame.Tekla
         private PlanPlacement P;                              // cách đặt lấy từ plan (chỉnh trong tab Tekla)
         private readonly List<object> _created = new List<object>();
         public readonly List<string> Messages = new List<string>();
+        /// <summary>Thông tin (không phải cảnh báo): vd kết quả tự canh theo hình khối thật.</summary>
+        public readonly List<string> Notes = new List<string>();
+
+        private sealed class Calib { public string Rotation; public double Lat, Z; }
+        private Calib _vCal, _sCal;                           // kết quả tự canh (null = dùng đặt theo thông số)
 
         /// <summary>Mã khung: nếu có thì ghi vào UDA của part chính để "Sửa khung đã chọn" tìm lại được.</summary>
         public string FrameId;
@@ -45,6 +50,9 @@ namespace MeshFrame.Tekla
                 object tp = A.New(A.ModelType("TransformationPlane"), A.Point(f.Origin.X, f.Origin.Y, f.Origin.Z),
                                   A.Vector(f.U.X, f.U.Y, f.U.Z), A.Vector(f.V.X, f.V.Y, f.V.Z));
                 A.Call(wph, "SetCurrentTransformationPlane", tp);
+
+                _vCal = null; _sCal = null;
+                if (P.AutoPlacement) Calibrate(plan);
 
                 var bars = new List<object>();
                 var strips = new List<object>();
@@ -105,15 +113,18 @@ namespace MeshFrame.Tekla
         }
 
         // ------------------------------------------------------------------ thanh V / nẹp
-        /// <summary>Đường tham chiếu của V trong Tekla: On plane = Middle thì đặt theo tim cánh nằm (cách mép ngoài legA/2 vào trong),
-        /// At depth = Middle thì theo tim chiều cao (legB/2); cộng thêm lệch ngang người dùng nhập.</summary>
+        /// <summary>Đặt V trong Tekla. Tự canh (mặc định): xoay + lệch đã ĐO từ hình khối thật Tekla tạo ra, nên cánh nằm luôn ở dưới,
+        /// cánh đứng ở mép ngoài hướng lên, đúng chiều bất kể quy ước On plane/Rotation/At depth của bản Tekla.
+        /// Không tự canh: dùng các ô On plane/Rotation/At depth (Middle thì đặt theo tim) + lệch người dùng.</summary>
         private object InsertBar(PlanBar bar)
         {
             V2 n = (bar.End - bar.Start).Unit().Left();                       // phía cánh nằm (vào trong khung)
-            double lat = (P.VPlane == "MIDDLE" ? bar.LegA / 2 : 0) + P.VLateral;
-            double dz = P.VDepth == "MIDDLE" ? bar.LegB / 2 : 0;
+            string plane = P.VPlane, rot = P.VRotation, depth = P.VDepth;
+            double lat, dz;
+            if (_vCal != null) { plane = "MIDDLE"; depth = "MIDDLE"; rot = _vCal.Rotation; lat = _vCal.Lat + P.VLateral; dz = _vCal.Z; }
+            else { lat = (P.VPlane == "MIDDLE" ? bar.LegA / 2 : 0) + P.VLateral; dz = P.VDepth == "MIDDLE" ? bar.LegB / 2 : 0; }
             object beam = NewBeam(bar.Start + n * lat, bar.End + n * lat, bar.ZRef + dz);
-            Describe(beam, bar.Profile, bar.Material, bar.Name, bar.Class, bar.Prefix, bar.StartNo, P.VPlane, P.VRotation, P.VDepth);
+            Describe(beam, bar.Profile, bar.Material, bar.Name, bar.Class, bar.Prefix, bar.StartNo, plane, rot, depth);
             A.Require(beam, "Insert", "thanh " + bar.Profile + " (kiểm tra profile trong catalog)");
             _created.Add(beam);
             AddMiter(beam, bar.Start, bar.CutStart);
@@ -125,16 +136,124 @@ namespace MeshFrame.Tekla
         private object InsertStrip(PlanStrip st)
         {
             V2 n = (st.End - st.Start).Unit().Left();
-            double lat = P.StripLateral;
-            double dz = P.StripDepth == "MIDDLE" ? -st.Thk / 2 : 0;           // nẹp nằm phía ngoài (-Z) mặt tiếp xúc lưới
+            string plane = P.StripPlane, rot = P.StripRotation, depth = P.StripDepth;
+            double lat, dz;
+            if (_sCal != null) { plane = "MIDDLE"; depth = "MIDDLE"; rot = _sCal.Rotation; lat = _sCal.Lat + P.StripLateral; dz = _sCal.Z; }
+            else { lat = P.StripLateral; dz = P.StripDepth == "MIDDLE" ? -st.Thk / 2 : 0; }   // nẹp nằm phía ngoài (-Z) mặt tiếp xúc lưới
             object beam = NewBeam(st.Start + n * lat, st.End + n * lat, st.ZRef + dz);
-            Describe(beam, st.Profile, st.Material, st.Name, st.Class, st.Prefix, st.StartNo, P.StripPlane, P.StripRotation, P.StripDepth);
+            Describe(beam, st.Profile, st.Material, st.Name, st.Class, st.Prefix, st.StartNo, plane, rot, depth);
             A.Require(beam, "Insert", "nẹp " + st.Profile + " (kiểm tra profile trong catalog)");
             _created.Add(beam);
             AddMiter(beam, st.Start, st.CutStart);
             AddMiter(beam, st.End, st.CutEnd);
             return beam;
         }
+
+        // ------------------------------------------------------------------ tự canh theo hình khối thật
+        private static readonly string[] Rotations = { "FRONT", "TOP", "BACK", "BELOW" };
+
+        private void Calibrate(MeshFramePlan plan)
+        {
+            PlanBar bar = null; foreach (PlanBar b in plan.Bars) if (b.Role == BarRole.Frame) { bar = b; break; }
+            PlanStrip strip = plan.Strips.Count > 0 ? plan.Strips[0] : null;
+            try
+            {
+                if (bar != null) _vCal = CalibrateAngle(bar, P.VRotation);
+                if (strip != null) _sCal = CalibrateFlat(strip, P.StripRotation);
+                if (bar != null && _vCal == null) Messages.Add("Không tự canh được V theo hình khối thật (không tìm được hướng xoay cho thép góc " + bar.Profile + "): dùng đặt theo thông số, có thể lệch.");
+                if (strip != null && _sCal == null) Messages.Add("Không tự canh được nẹp theo hình khối thật (profile " + strip.Profile + " không ra dạng dẹt " + F(strip.Width) + "x" + F(strip.Thk) + "): dùng đặt theo thông số, có thể lệch.");
+                if (_vCal != null || _sCal != null)
+                    Notes.Add("Tự canh theo hình khối thật Tekla: " + (_vCal == null ? "" : "V xoay " + _vCal.Rotation + ", lệch ngang " + F(_vCal.Lat) + " mm, lệch cao " + F(_vCal.Z) + " mm")
+                              + (_vCal != null && _sCal != null ? "; " : "") + (_sCal == null ? "" : "nẹp xoay " + _sCal.Rotation + ", lệch ngang " + F(_sCal.Lat) + " mm, lệch cao " + F(_sCal.Z) + " mm") + ".");
+            }
+            catch (Exception ex)
+            {
+                _vCal = null; _sCal = null;
+                Messages.Add("Không đo được hình khối Tekla (" + Root(ex).GetType().Name + ": " + Root(ex).Message + "): dùng đặt theo thông số, có thể lệch.");
+            }
+        }
+
+        private static List<string> RotationOrder(string first)
+        {
+            var l = new List<string> { first };
+            foreach (string r in Rotations) if (r != first) l.Add(r);
+            return l;
+        }
+
+        private sealed class Box { public double XMin, XMax, YMin, YMax, ZMin, ZMax; public object Solid; }
+
+        /// <summary>Tạo thanh mẫu dọc trục X của mặt phẳng khung, On plane / At depth = MIDDLE, đo hình khối thật rồi xóa thanh mẫu.</summary>
+        private T WithSample<T>(string profile, string material, string rotation, Func<Box, T> use)
+        {
+            object beam = NewBeam(new V2(0, 0), new V2(300, 0), 0);
+            try
+            {
+                Describe(beam, profile, material, "MF_CALIB", "0", "X", 1, "MIDDLE", rotation, "MIDDLE");
+                A.Require(beam, "Insert", "thanh mẫu " + profile);
+                object solid = A.Call(beam, "GetSolid");
+                if (solid == null) throw new InvalidOperationException("Tekla không trả về hình khối của thanh mẫu.");
+                object mn = A.Get(solid, "MinimumPoint"), mx = A.Get(solid, "MaximumPoint");
+                var box = new Box
+                {
+                    Solid = solid,
+                    XMin = A.GetDouble(mn, "X"), YMin = A.GetDouble(mn, "Y"), ZMin = A.GetDouble(mn, "Z"),
+                    XMax = A.GetDouble(mx, "X"), YMax = A.GetDouble(mx, "Y"), ZMax = A.GetDouble(mx, "Z")
+                };
+                if (Math.Abs((box.XMax - box.XMin) - 300) > 1.0)
+                    throw new InvalidOperationException("hình khối đo được không khớp thanh mẫu (chiều dài " + F(box.XMax - box.XMin) + " thay vì 300) - toạ độ của Tekla khác work plane?");
+                return use(box);
+            }
+            finally { try { A.Call(beam, "Delete"); } catch (Exception) { } }
+        }
+
+        /// <summary>Độ trải (max - min) theo trục 'Y' hay 'Z' của các điểm giao giữa đoạn thẳng và hình khối.</summary>
+        private double Span(object solid, double x, double y1, double z1, double y2, double z2, char axis)
+        {
+            IList pts = A.Call(solid, "Intersect", A.Point(x, y1, z1), A.Point(x, y2, z2)) as IList;
+            if (pts == null || pts.Count < 2) return 0;
+            double lo = double.MaxValue, hi = double.MinValue;
+            foreach (object p in pts) { double v = A.GetDouble(p, axis == 'Y' ? "Y" : "Z"); lo = Math.Min(lo, v); hi = Math.Max(hi, v); }
+            return hi - lo;
+        }
+
+        /// <summary>Thép góc: tìm hướng xoay để cánh nằm (legA) ở dưới, cánh đứng (legB) ở mép NGOÀI (y nhỏ) hướng lên (+Z); rồi tính lệch để góc ngoài-dưới trùng đường tham chiếu.</summary>
+        private Calib CalibrateAngle(PlanBar bar, string first)
+        {
+            foreach (string rot in RotationOrder(first))
+            {
+                Calib c = WithSample<Calib>(bar.Profile, bar.Material, rot, delegate (Box m)
+                {
+                    double sy = m.YMax - m.YMin, sz = m.ZMax - m.ZMin;
+                    if (Math.Abs(sy - bar.LegA) > 0.6 || Math.Abs(sz - bar.LegB) > 0.6) return null;      // cánh dài sai trục
+                    double x = (m.XMin + m.XMax) / 2, t = bar.Thk;
+                    bool hBottom = Span(m.Solid, x, m.YMin - 2, m.ZMin + t / 2, m.YMax + 2, m.ZMin + t / 2, 'Y') > 0.7 * sy
+                                   && Span(m.Solid, x, m.YMin - 2, m.ZMax - t / 2, m.YMax + 2, m.ZMax - t / 2, 'Y') < 0.7 * sy;
+                    bool vOuter = Span(m.Solid, x, m.YMin + t / 2, m.ZMin - 2, m.YMin + t / 2, m.ZMax + 2, 'Z') > 0.7 * sz
+                                  && Span(m.Solid, x, m.YMax - t / 2, m.ZMin - 2, m.YMax - t / 2, m.ZMax + 2, 'Z') < 0.7 * sz;
+                    return hBottom && vOuter ? new Calib { Rotation = rot, Lat = -m.YMin, Z = -m.ZMin } : null;
+                });
+                if (c != null) return c;
+            }
+            return null;
+        }
+
+        /// <summary>Thép dẹt: tìm hướng xoay để bề rộng nằm ngang (y) và bề dày theo Z; rồi canh tim ngang trùng đường tham chiếu, mặt trên chạm mặt lưới (z = 0).</summary>
+        private Calib CalibrateFlat(PlanStrip st, string first)
+        {
+            foreach (string rot in RotationOrder(first))
+            {
+                Calib c = WithSample<Calib>(st.Profile, st.Material, rot, delegate (Box m)
+                {
+                    double sy = m.YMax - m.YMin, sz = m.ZMax - m.ZMin;
+                    if (Math.Abs(sy - st.Width) > 0.3 || Math.Abs(sz - st.Thk) > 0.3) return null;
+                    return new Calib { Rotation = rot, Lat = -(m.YMin + m.YMax) / 2, Z = -m.ZMax };
+                });
+                if (c != null) return c;
+            }
+            return null;
+        }
+
+        private static string F(double d) { return d.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture); }
 
         private object NewBeam(V2 a, V2 b, double z)
         {

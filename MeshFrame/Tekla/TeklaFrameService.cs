@@ -63,6 +63,7 @@ namespace MeshFrame.Tekla
             }
             catch (Exception ex) { sb.AppendLine("⚠ Không lưu được bản ghi khung: " + Root(ex).Message); }
 
+            foreach (string w in writer.Notes) sb.AppendLine("ℹ " + w);
             foreach (string w in p.Warnings) sb.AppendLine("⚠ " + w);
             foreach (string w in writer.Messages) sb.AppendLine("⚠ " + w);
             return new ServiceResult { Success = true, FrameId = id, Message = sb.ToString().TrimEnd() };

@@ -28,7 +28,7 @@ namespace MeshFrame.Core
             {
                 VPlane = PlanPlacement.Name(s.VPlane), VRotation = PlanPlacement.Name(s.VRotation), VDepth = PlanPlacement.Name(s.VDepth),
                 StripPlane = PlanPlacement.Name(s.StripPlane), StripRotation = PlanPlacement.Name(s.StripRotation), StripDepth = PlanPlacement.Name(s.StripDepth),
-                FlipMiterCut = s.FlipMiterCut, VLateral = s.VLateral, StripLateral = s.StripLateral
+                FlipMiterCut = s.FlipMiterCut, AutoPlacement = s.AutoPlacement, VLateral = s.VLateral, StripLateral = s.StripLateral
             };
             WarnNonAscii(s, plan);
 

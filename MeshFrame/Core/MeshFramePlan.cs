@@ -47,7 +47,7 @@ namespace MeshFrame.Core
     public class PlanPlacement
     {
         public string VPlane, VRotation, VDepth, StripPlane, StripRotation, StripDepth;
-        public bool FlipMiterCut;
+        public bool FlipMiterCut, AutoPlacement;
         public double VLateral, StripLateral;
         public static string Name(PlaneKind k) { return k.ToString().ToUpperInvariant(); }
         public static string Name(RotationKind k) { return k.ToString().ToUpperInvariant(); }

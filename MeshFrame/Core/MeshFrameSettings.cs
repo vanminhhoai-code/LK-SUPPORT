@@ -51,6 +51,7 @@ namespace MeshFrame.Core
         public RotationKind VRotation = RotationKind.Front, StripRotation = RotationKind.Front;
         public DepthKind VDepth = DepthKind.Middle, StripDepth = DepthKind.Middle;
         public double VLateral = 0, StripLateral = 0;   // lệch ngang tinh chỉnh (mm, dương = vào trong khung)
+        public bool AutoPlacement = true;               // tự đo hình khối thật Tekla tạo ra rồi canh V và nẹp (khuyến nghị); tắt = dùng đúng các ô On plane/Rotation/At depth
         public bool FlipMiterCut = false;
 
         /// <summary>Kiểm tra dữ liệu nhập. Rỗng = hợp lệ.</summary>

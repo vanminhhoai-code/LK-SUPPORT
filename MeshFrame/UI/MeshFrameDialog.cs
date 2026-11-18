@@ -199,7 +199,8 @@ namespace MeshFrame.UI
         private TabPage TabTekla()
         {
             var t = NewPage("Tekla");
-            Note(t, "Chỉnh khi kết quả trong Tekla lệch. Mặc định đặt theo tim (On plane / At depth = Middle) để V và nẹp trùng tim. Dùng chữ KHÔNG DẤU cho các ô gửi sang Tekla.");
+            Note(t, "Mặc định app TỰ ĐO hình khối thật mà Tekla tạo ra (thép góc xoay đúng chiều, nẹp nằm giữa cánh V, dưới lưới) rồi canh lại. Chỉ tắt khi muốn tự đặt các ô On plane / Rotation / At depth bên dưới. Dùng chữ KHÔNG DẤU cho các ô gửi sang Tekla.");
+            Row(t, "AutoPlacement", "Tự canh V và nẹp theo hình khối thật (khuyến nghị)");
             Row(t, "VProfile", "Profile V khung + gia cường (trống = tự tạo)");
             Row(t, "StripProfile", "Profile nẹp (trống = tự tạo FL w*t)");
             Note(t, "Hướng đặt thép góc V khung (V gia cường dùng chung):");
@@ -210,8 +211,8 @@ namespace MeshFrame.UI
             Row(t, "StripPlane", "  On plane", "Left", "Middle", "Right");
             Row(t, "StripRotation", "  Rotation", "Front", "Top", "Back", "Below");
             Row(t, "StripDepth", "  At depth", "Front", "Middle", "Behind");
-            Row(t, "VLateral", "Lệch ngang V (mm, + vào trong khung)");
-            Row(t, "StripLateral", "Lệch ngang nẹp (mm, + vào trong khung)");
+            Row(t, "VLateral", "Lệch ngang V thêm (mm, + vào trong khung)");
+            Row(t, "StripLateral", "Lệch ngang nẹp thêm (mm, + vào trong khung)");
             Row(t, "FlipMiterCut", "Đảo phía cắt vát (nếu mặt cắt vát ra ngược)");
             var probe = new Button { Text = "Đọc lưới mẫu đang chọn trong Tekla", AutoSize = true, Margin = new Padding(3, 10, 3, 3) };
             probe.Click += delegate
@@ -398,6 +399,7 @@ namespace MeshFrame.UI
         {
             bool strip = _s.UseStrip;
             foreach (string n in new[] { "StripWidth", "StripThk", "StripMaterial", "StripName", "StripClass", "StripPrefix", "StripStartNo" }) Enable(n, strip);
+            foreach (string n in new[] { "VPlane", "VDepth", "StripPlane", "StripDepth" }) Enable(n, !_s.AutoPlacement);       // tự canh: Plane/Depth do app quyết định (Middle)
             bool stiff = _s.StiffMode != StiffMode.None;
             foreach (string n in new[] { "StiffBaseEdge", "SMaterial", "SName", "SClass", "SPrefix", "SStartNo" }) Enable(n, stiff);
             Enable("StiffMax", _s.StiffMode == StiffMode.Equal);

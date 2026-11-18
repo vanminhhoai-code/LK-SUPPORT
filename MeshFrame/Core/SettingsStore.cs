@@ -9,6 +9,9 @@ namespace MeshFrame.Core
 {
     public static class SettingsStore
     {
+        /// <summary>Tăng khi mặc định thay đổi: file thiết lập cũ hơn bị bỏ (đổi tên .bak) để mặc định mới có hiệu lực.</summary>
+        public const int CurrentVersion = 3;
+
         /// <summary>Các dòng key=value của thông số (dùng cho file thông số và file bản ghi khung).</summary>
         public static List<string> ToLines(MeshFrameSettings s)
         {
@@ -25,14 +28,25 @@ namespace MeshFrame.Core
         {
             string dir = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            File.WriteAllLines(path, ToLines(s).ToArray());
+            var lines = new List<string> { "@version=" + CurrentVersion };
+            lines.AddRange(ToLines(s));
+            File.WriteAllLines(path, lines.ToArray());
         }
 
         /// <summary>Nạp từ file; thiếu file hoặc khóa lỗi thì giữ giá trị mặc định.</summary>
         public static MeshFrameSettings Load(string path)
         {
             if (!File.Exists(path)) return new MeshFrameSettings();
-            return FromLines(File.ReadAllLines(path));
+            string[] lines = File.ReadAllLines(path);
+            int version = 0;
+            foreach (string l in lines) if (l.StartsWith("@version=")) int.TryParse(l.Substring(9), NumberStyles.Integer, CultureInfo.InvariantCulture, out version);
+            if (version < CurrentVersion)
+            {
+                // Thiết lập lưu từ bản cũ (vd On plane = Left, vật liệu, tiết diện 50x50x3...) làm mặc định mới không có hiệu lực.
+                try { File.Copy(path, path + ".v" + version + ".bak", true); File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                return new MeshFrameSettings();
+            }
+            return FromLines(lines);
         }
 
         public static MeshFrameSettings FromLines(IEnumerable<string> lines)

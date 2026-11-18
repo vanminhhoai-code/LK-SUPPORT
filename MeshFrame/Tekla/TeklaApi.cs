@@ -68,8 +68,14 @@ namespace MeshFrame.Tekla
             return System.Enum.Parse(t, value);
         }
 
+        private static void NeedTarget(object target, string name)
+        {
+            if (target == null) throw new InvalidOperationException("Tekla trả về null khi cần đối tượng cho '" + name + "' (đối tượng không tồn tại hoặc không thuộc assembly).");
+        }
+
         public object Get(object target, string name)
         {
+            NeedTarget(target, name);
             for (Type l = target.GetType(); l != null; l = l.BaseType)
             {
                 PropertyInfo p = l.GetProperty(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
@@ -93,6 +99,7 @@ namespace MeshFrame.Tekla
 
         public void Set(object target, string name, object value)
         {
+            NeedTarget(target, name);
             for (Type l = target.GetType(); l != null; l = l.BaseType)
             {
                 PropertyInfo p = l.GetProperty(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
@@ -117,6 +124,7 @@ namespace MeshFrame.Tekla
 
         public object Call(object target, string name, params object[] args)
         {
+            NeedTarget(target, name);
             for (Type l = target.GetType(); l != null; l = l.BaseType)
             {
                 foreach (MethodInfo m in l.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
@@ -144,6 +152,7 @@ namespace MeshFrame.Tekla
         /// <summary>Gọi hàm có tham số ref/out (vd GetUserProperty(name, ref value)). Trả về mảng đối số SAU khi gọi (giá trị ref nằm trong đó).</summary>
         public object[] CallRef(object target, string name, params object[] args)
         {
+            NeedTarget(target, name);
             for (Type l = target.GetType(); l != null; l = l.BaseType)
             {
                 foreach (MethodInfo m in l.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))

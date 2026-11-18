@@ -89,9 +89,17 @@ namespace MeshFrame.App
                 };
                 dlg.EditHandler = delegate
                 {
-                    string err;
-                    FrameRecord rec = svc.LoadSelected(out err);
-                    return rec == null ? new LoadedFrame { Error = err } : new LoadedFrame { Settings = rec.Settings, Points = rec.Corners, Id = rec.Id };
+                    try
+                    {
+                        string err;
+                        FrameRecord rec = svc.LoadSelected(out err);
+                        return rec == null ? new LoadedFrame { Error = err } : new LoadedFrame { Settings = rec.Settings, Points = rec.Corners, Id = rec.Id };
+                    }
+                    catch (Exception ex)
+                    {
+                        return new LoadedFrame { Error = "Không đọc được khung đang chọn: " + Root(ex).GetType().Name + ": " + Root(ex).Message
+                                                         + "\n(Khung tạo bằng bản cũ không có mã khung - hãy tạo lại bằng bản này.)" };
+                    }
                 };
                 try
                 {

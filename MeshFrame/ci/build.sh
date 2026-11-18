@@ -14,7 +14,7 @@ FAKE="$OUT/fake"; mkdir -p "$FAKE"
 mcs -target:library -out:"$FAKE/Tekla.Structures.dll" Tests/FakeSdk/FakeGeo.cs
 mcs -target:library -out:"$FAKE/Tekla.Structures.Model.dll" -r:"$FAKE/Tekla.Structures.dll" Tests/FakeSdk/FakeModel.cs
 mcs -target:library -out:"$FAKE/Tekla.Structures.Catalogs.dll" Tests/FakeSdk/FakeCatalogs.cs
-mcs -out:"$FAKE/WriterTests.exe" -r:"$FAKE/Tekla.Structures.Model.dll" -r:"$FAKE/Tekla.Structures.Catalogs.dll" -r:System.Core.dll Core/*.cs Tekla/*.cs Tests/WriterTests.cs
+mcs -out:"$FAKE/WriterTests.exe" -r:"$FAKE/Tekla.Structures.dll" -r:"$FAKE/Tekla.Structures.Model.dll" -r:"$FAKE/Tekla.Structures.Catalogs.dll" -r:System.Core.dll Core/*.cs Tekla/*.cs Tests/WriterTests.cs
 mono "$FAKE/WriterTests.exe" "$FAKE" "$OUT/members.txt"
 echo "== Bộ ghi trên SDK giả kiểu Tekla 21.1 (thiếu PickPoint(chuỗi, điểm))"
 LEG="$OUT/fake21"; mkdir -p "$LEG"

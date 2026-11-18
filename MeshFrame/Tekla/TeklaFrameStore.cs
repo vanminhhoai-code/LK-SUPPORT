@@ -40,6 +40,7 @@ namespace MeshFrame.Tekla
             while ((bool)api.Call(en, "MoveNext"))
             {
                 object o = api.Get(en, "Current");
+                if (o == null) continue;
                 string id = ReadId(api, o);
                 object main = o;
                 if (id.Length == 0)
@@ -47,7 +48,9 @@ namespace MeshFrame.Tekla
                     try
                     {
                         object asm = api.Call(o, "GetAssembly");
+                        if (asm == null) continue;                          // part không thuộc assembly nào (vd khung tạo từ bản cũ bị dở dang)
                         main = api.Call(asm, "GetMainPart");
+                        if (main == null) continue;
                         id = ReadId(api, main);
                     }
                     catch (MissingMethodException) { continue; }

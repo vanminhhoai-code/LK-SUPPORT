@@ -9,9 +9,11 @@ namespace Tekla.Structures.Model
     public static class FakeLog
     {
         public static readonly List<string> Entries = new List<string>();
-        public static bool RejectInsert, RejectRebarMesh, RejectPolygonMesh, NonAsciiPrompt;
+        public static bool RejectInsert, RejectRebarMesh, RejectPolygonMesh, NonAsciiPrompt, NoSolid, NullAssembly;
+        public static int SectionTurn;                                                    // xoay thêm tiết diện giả (độ) để thử quy ước đặt khác
         public static int FailBeamAt = -1, BeamCount, PickFailAt = -1, Picked;
         public static readonly List<string> BeamPositions = new List<string>();
+        public static readonly List<Beam> Beams = new List<Beam>();                     // thanh THẬT (không tính thanh mẫu MF_CALIB)
         public static readonly List<double[]> BeamStarts = new List<double[]>();
         public static readonly List<ModelObject> Selected = new List<ModelObject>();
         public static readonly List<RebarMesh> Meshes = new List<RebarMesh>();
@@ -22,7 +24,7 @@ namespace Tekla.Structures.Model
         public static void Add(string s) { Entries.Add(s); }
         public static void Reset()
         {
-            Entries.Clear(); BeamPositions.Clear(); BeamStarts.Clear(); Meshes.Clear(); Prompts.Clear(); Uda.Clear(); Selected.Clear();
+            Entries.Clear(); BeamPositions.Clear(); BeamStarts.Clear(); Beams.Clear(); SectionTurn = 0; NoSolid = false; NullAssembly = false; Meshes.Clear(); Prompts.Clear(); Uda.Clear(); Selected.Clear();
             RejectInsert = RejectRebarMesh = RejectPolygonMesh = false; FailBeamAt = -1; BeamCount = 0;
         }
     }
@@ -46,12 +48,13 @@ namespace Tekla.Structures.Model
         {
             FakeLog.Add("Insert " + GetType().Name);
             var b = this as Beam;
-            if (b != null)
+            if (b != null && b.Name != "MF_CALIB")
             {
                 FakeLog.BeamCount++;
                 if (FakeLog.BeamCount == FakeLog.FailBeamAt) return false;
                 FakeLog.BeamPositions.Add(b.Position.Plane + "/" + b.Position.Rotation + "/" + b.Position.Depth);
                 FakeLog.BeamStarts.Add(new[] { b.StartPoint.X, b.StartPoint.Y, b.StartPoint.Z });
+                FakeLog.Beams.Add(b);
             }
             var m = this as RebarMesh;
             if (m != null) m.Validate();
@@ -88,9 +91,86 @@ namespace Tekla.Structures.Model
         public Position Position { get; set; } = new Position();
         private static readonly Dictionary<Part, Assembly> asm = new Dictionary<Part, Assembly>();
         internal static void Link(Part p, Assembly a) { asm[p] = a; }
-        public Assembly GetAssembly() { Assembly a; if (!asm.TryGetValue(this, out a)) { a = new Assembly(this); asm[this] = a; } return a; }
+        public Assembly GetAssembly() { if (FakeLog.NullAssembly) return null; Assembly a; if (!asm.TryGetValue(this, out a)) { a = new Assembly(this); asm[this] = a; } return a; }
     }
-    public class Beam : Part { public Point StartPoint { get; set; } public Point EndPoint { get; set; } public Beam(Point s, Point e) { StartPoint = s; EndPoint = e; } }
+    /// <summary>Hình khối giả: lăng trụ của tiết diện (y, z) dọc trục X. Dùng để thử thuật toán tự canh với một quy ước đặt KHÁC giả định của app.</summary>
+    public class Solid
+    {
+        public Point MinimumPoint { get; set; }
+        public Point MaximumPoint { get; set; }
+        internal List<double[]> Poly = new List<double[]>();   // (y, z) tuyệt đối
+        internal double X0, X1;
+
+        public ArrayList Intersect(Point p1, Point p2)
+        {
+            var res = new ArrayList();
+            if (p1.X < X0 - 1e-9 || p1.X > X1 + 1e-9) return res;
+            double dy = p2.Y - p1.Y, dz = p2.Z - p1.Z;
+            var hits = new List<double[]>();
+            for (int i = 0; i < Poly.Count; i++)
+            {
+                double[] a = Poly[i], b = Poly[(i + 1) % Poly.Count];
+                double fy = b[0] - a[0], fz = b[1] - a[1];
+                double den = dy * fz - dz * fy;
+                if (System.Math.Abs(den) < 1e-12) continue;
+                double t = ((a[0] - p1.Y) * fz - (a[1] - p1.Z) * fy) / den, u = ((a[0] - p1.Y) * dz - (a[1] - p1.Z) * dy) / den;
+                if (t >= 0 && t <= 1 && u >= 0 && u <= 1) hits.Add(new[] { t, p1.Y + t * dy, p1.Z + t * dz });
+            }
+            hits.Sort((h1, h2) => h1[0].CompareTo(h2[0]));
+            foreach (double[] h in hits) res.Add(new Point(p1.X, h[1], h[2]));
+            return res;
+        }
+    }
+
+    public class Beam : Part
+    {
+        public Point StartPoint { get; set; } public Point EndPoint { get; set; }
+        public Beam(Point s, Point e) { StartPoint = s; EndPoint = e; }
+
+        // Quy ước ĐẶT GIẢ (cố ý khác giả định của app): Rotation FRONT = 90°, TOP = 180°, BACK = 270°, BELOW = 0°.
+        // Plane LEFT: tham chiếu ở mép y lớn; RIGHT: mép y nhỏ. Depth FRONT: tham chiếu ở mép z lớn; BEHIND: mép z nhỏ.
+        public Solid GetSolid()
+        {
+            if (FakeLog.NoSolid) throw new System.NotSupportedException("GetSolid không có trên bản Tekla này");
+            var sec = new List<double[]>();
+            string pr = Profile.ProfileString ?? "";
+            if (pr.StartsWith("FL"))
+            {
+                string[] t = pr.Substring(2).Split('*'); double w = double.Parse(t[0], System.Globalization.CultureInfo.InvariantCulture), th = double.Parse(t[1], System.Globalization.CultureInfo.InvariantCulture);
+                sec.Add(new[] { 0.0, 0 }); sec.Add(new[] { w, 0 }); sec.Add(new[] { w, th }); sec.Add(new[] { 0.0, th });
+            }
+            else if (pr.StartsWith("L"))
+            {
+                string[] t = pr.Substring(1).Split('*'); var ci = System.Globalization.CultureInfo.InvariantCulture;
+                double a = double.Parse(t[0], ci), b = double.Parse(t[1], ci), th = double.Parse(t[2], ci);
+                sec.Add(new[] { 0.0, 0 }); sec.Add(new[] { a, 0 }); sec.Add(new[] { a, th }); sec.Add(new[] { th, th }); sec.Add(new[] { th, b }); sec.Add(new[] { 0.0, b });
+            }
+            else { sec.Add(new[] { 0.0, 0 }); sec.Add(new[] { 10.0, 0 }); sec.Add(new[] { 10.0, 10 }); sec.Add(new[] { 0.0, 10 }); }
+
+            double ang = Position.Rotation == Position.RotationEnum.FRONT ? 90 : Position.Rotation == Position.RotationEnum.TOP ? 180 : Position.Rotation == Position.RotationEnum.BACK ? 270 : 0;
+            ang += FakeLog.SectionTurn;
+            double c = System.Math.Round(System.Math.Cos(ang * System.Math.PI / 180)), sn = System.Math.Round(System.Math.Sin(ang * System.Math.PI / 180));
+            double y0 = double.MaxValue, y1 = double.MinValue, z0 = double.MaxValue, z1 = double.MinValue;
+            for (int i = 0; i < sec.Count; i++)
+            {
+                double y = sec[i][0] * c - sec[i][1] * sn, z = sec[i][0] * sn + sec[i][1] * c;
+                sec[i] = new[] { y, z };
+                y0 = System.Math.Min(y0, y); y1 = System.Math.Max(y1, y); z0 = System.Math.Min(z0, z); z1 = System.Math.Max(z1, z);
+            }
+            double dy = Position.Plane == Position.PlaneEnum.MIDDLE ? -(y0 + y1) / 2 : Position.Plane == Position.PlaneEnum.LEFT ? -y1 : -y0;
+            double dz = Position.Depth == Position.DepthEnum.MIDDLE ? -(z0 + z1) / 2 : Position.Depth == Position.DepthEnum.FRONT ? -z1 : -z0;
+            var s = new Solid { X0 = System.Math.Min(StartPoint.X, EndPoint.X), X1 = System.Math.Max(StartPoint.X, EndPoint.X) };
+            double miny = double.MaxValue, maxy = double.MinValue, minz = double.MaxValue, maxz = double.MinValue;
+            foreach (double[] p in sec)
+            {
+                double y = p[0] + dy + StartPoint.Y, z = p[1] + dz + StartPoint.Z;
+                s.Poly.Add(new[] { y, z });
+                miny = System.Math.Min(miny, y); maxy = System.Math.Max(maxy, y); minz = System.Math.Min(minz, z); maxz = System.Math.Max(maxz, z);
+            }
+            s.MinimumPoint = new Point(s.X0, miny, minz); s.MaximumPoint = new Point(s.X1, maxy, maxz);
+            return s;
+        }
+    }
     public class Assembly : ModelObject
     {
         private readonly Part _main; private readonly ArrayList _sec = new ArrayList();

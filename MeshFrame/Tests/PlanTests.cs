@@ -195,6 +195,16 @@ static class PlanTests
         SettingsStore.Save(cfg2, tmp); var back2 = SettingsStore.Load(tmp); System.IO.File.Delete(tmp);
         Check("luu/nap huong dat + profile + kieu luoi", back2.VPlane == PlaneKind.Right && back2.StripDepth == DepthKind.Behind && back2.FlipMiterCut && back2.VProfile == "L50x50x3" && back2.MeshKind == MeshKind.Plate);
         Check("nap file khong ton tai = mac dinh", Near(SettingsStore.Load("/khong/co/file.ini").VLegA, 25, 1e-12));
+        // thiết lập lưu từ bản cũ (không có @version) bị bỏ -> mặc định mới có hiệu lực (lỗi thật: On plane = Left lưu từ bản cũ)
+        System.IO.File.WriteAllLines(tmp, new[] { "VPlane=Left", "VDepth=Front", "VLegA=50", "StripDepth=Behind" });
+        var old = SettingsStore.Load(tmp);
+        Check("thiet lap cu (khong @version) bi bo: mac dinh moi (Middle, 25) co hieu luc", old.VPlane == PlaneKind.Middle && old.VDepth == DepthKind.Middle && Near(old.VLegA, 25, 0) && old.StripDepth == DepthKind.Middle);
+        Check("thiet lap cu duoc sao luu .bak", System.IO.File.Exists(tmp + ".v0.bak") && !System.IO.File.Exists(tmp));
+        System.IO.File.Delete(tmp + ".v0.bak");
+        SettingsStore.Save(new MeshFrameSettings { VLegA = 31 }, tmp);
+        Check("thiet lap moi (co @version) nap binh thuong", Near(SettingsStore.Load(tmp).VLegA, 31, 0));
+        System.IO.File.Delete(tmp);
+        Check("mac dinh tu canh bat", new MeshFrameSettings().AutoPlacement);
 
         // --- hình học cơ bản
         Check("IsSimple: hinh chu nhat", Geo.IsSimple(Rect(10, 10, 0)));

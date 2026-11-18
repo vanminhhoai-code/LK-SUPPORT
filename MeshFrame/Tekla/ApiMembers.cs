@@ -14,6 +14,7 @@ call Tekla.Structures.Model.Assembly::GetSecondaries()
 call Tekla.Structures.Model.Assembly::Modify()
 call Tekla.Structures.Model.Beam::Delete()
 call Tekla.Structures.Model.Beam::GetAssembly()
+call Tekla.Structures.Model.Beam::GetSolid()
 call Tekla.Structures.Model.Beam::GetUserProperty(System.String;System.String&)
 call Tekla.Structures.Model.Beam::Insert()
 call Tekla.Structures.Model.Beam::SetUserProperty(System.String;System.String)
@@ -28,6 +29,7 @@ call Tekla.Structures.Model.Model::GetInfo()
 call Tekla.Structures.Model.Model::GetWorkPlaneHandler()
 call Tekla.Structures.Model.ModelObjectEnumerator::MoveNext()
 call Tekla.Structures.Model.RebarMesh::Insert()
+call Tekla.Structures.Model.Solid::Intersect(Tekla.Structures.Geometry3d.Point;Tekla.Structures.Geometry3d.Point)
 call Tekla.Structures.Model.UI.GraphicsDrawer::DrawLineSegment(Tekla.Structures.Geometry3d.Point;Tekla.Structures.Geometry3d.Point;Tekla.Structures.Model.UI.Color)
 call Tekla.Structures.Model.UI.GraphicsDrawer::DrawText(Tekla.Structures.Geometry3d.Point;System.String;Tekla.Structures.Model.UI.Color)
 call Tekla.Structures.Model.UI.GraphicsDrawer::RemoveTemporaryGraphicsObjects(System.Collections.Generic.List`1[[System.Int32, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089]])
@@ -73,6 +75,8 @@ get Tekla.Structures.Model.RebarMesh::CrossDistances
 get Tekla.Structures.Model.RebarMesh::LongitudinalDistances
 get Tekla.Structures.Model.RebarMesh::NumberingSeries
 get Tekla.Structures.Model.RebarMesh::OnPlaneOffsets
+get Tekla.Structures.Model.Solid::MaximumPoint
+get Tekla.Structures.Model.Solid::MinimumPoint
 get Tekla.Structures.Model.TransformationPlane::TransformationMatrixToGlobal
 new Tekla.Structures.Catalogs.CatalogHandler()
 new Tekla.Structures.Geometry3d.Point(System.Double;System.Double;System.Double)
