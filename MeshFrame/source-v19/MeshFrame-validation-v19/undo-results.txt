@@ -1,0 +1,9 @@
+PASS delete point CtrlZ restores point order, coordinates, anchor, edit target
+PASS delete anchor P4 then undo
+PASS edge dimension CtrlZ restores whole shape
+PASS cell dimension CtrlZ restores cells without resizing frame
+PASS coordinate committed then CtrlZ
+PASS CtrlZ while coordinate edit still active
+PASS multiple edits undo in reverse order
+PASS no history CtrlZ is safe
+RESULT 8 passed 0 failed

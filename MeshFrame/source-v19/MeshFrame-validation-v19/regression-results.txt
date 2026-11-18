@@ -1,0 +1,45 @@
+PASS 5000x1800 with 2500 cells has no fixed standard warnings
+PASS cell edit 0 anchor 1 trapezoid=False
+PASS cell edit 1 anchor 1 trapezoid=False
+PASS cell edit 4 anchor 1 trapezoid=False
+PASS cell edit 0 anchor 2 trapezoid=False
+PASS cell edit 1 anchor 2 trapezoid=False
+PASS cell edit 4 anchor 2 trapezoid=False
+PASS cell edit 0 anchor 3 trapezoid=False
+PASS cell edit 1 anchor 3 trapezoid=False
+PASS cell edit 4 anchor 3 trapezoid=False
+PASS cell edit 0 anchor 4 trapezoid=False
+PASS cell edit 1 anchor 4 trapezoid=False
+PASS cell edit 4 anchor 4 trapezoid=False
+PASS cell edit 0 anchor 1 trapezoid=True
+PASS cell edit 1 anchor 1 trapezoid=True
+PASS cell edit 4 anchor 1 trapezoid=True
+PASS cell edit 0 anchor 2 trapezoid=True
+PASS cell edit 1 anchor 2 trapezoid=True
+PASS cell edit 4 anchor 2 trapezoid=True
+PASS cell edit 0 anchor 3 trapezoid=True
+PASS cell edit 1 anchor 3 trapezoid=True
+PASS cell edit 4 anchor 3 trapezoid=True
+PASS cell edit 0 anchor 4 trapezoid=True
+PASS cell edit 1 anchor 4 trapezoid=True
+PASS cell edit 4 anchor 4 trapezoid=True
+PASS perimeter strips at V edge Middle
+PASS perimeter strips at V edge Left
+PASS perimeter strips at V edge Right
+PASS coordinate edit can switch grid cell without reentrant exception
+PASS empty editor does not invoke PickHandler
+PASS create result remains visible after successful button click
+PASS miter strip outer corners match frame False
+PASS miter strip outer corners match frame True
+PASS P3 anchor persists when points are loaded
+PASS origin selector changes anchor and follows point click
+PASS loading existing frame preserves its chosen origin
+PASS frame record stores pose and native endpoints
+PASS changing origin selection does not move geometry
+PASS chosen origin XYZ remains editable in coordinates table
+PASS 3640 screenshot example preserves all frame corners
+PASS 1000 terminal reduces to 500 when middle increases by 500
+PASS not enough residual rejects edit without changing frame or settings
+PASS editing a terminal compensates the opposite terminal
+PASS explicit frame edge dimension can still resize
+RESULT 44 passed 0 failed
