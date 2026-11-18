@@ -5,7 +5,8 @@ using System.Globalization;
 
 namespace MeshFrame.Core
 {
-    public enum CornerKind { Miter = 0, OneThrough = 1 }
+    public enum CornerKind { Miter = 0, OneThrough = 1 }   // vát 45° / cạnh song song cạnh gốc chạy dài, cạnh còn lại dừng sát
+    public enum StripPosKind { Middle = 0, Left = 1, Right = 2 }   // nẹp so với cánh nằm V: giữa / sát đầu cánh nằm (trong) / sát cánh đứng (ngoài)
     public enum StiffMode { None = 0, Equal = 1, Custom = 2 }
     public enum MeshKind { RebarMesh = 0, Plate = 1, None = 2 }   // lưới: tấm mỏng / Reinforcement Mesh / không tạo
     // Hướng đặt thép góc / nẹp trong Tekla (Position.Plane / Rotation / Depth). Thứ tự khớp tên enum Tekla.
@@ -41,6 +42,7 @@ namespace MeshFrame.Core
 
         // ---- Nẹp (tùy chọn)
         public bool UseStrip = true;
+        public StripPosKind StripPos = StripPosKind.Middle;   // vị trí nẹp so với cánh nằm V (Giữa / Trái / Phải)
         public double StripWidth = 25, StripThk = 1.2;   // chuẩn PL-25x1.2 (nhập được tiết diện khác)
         public string StripMaterial = "SUS304", StripName = "NEP LUOI", StripClass = "5", StripPrefix = "N";
         public int StripStartNo = 1;
@@ -54,6 +56,15 @@ namespace MeshFrame.Core
         public bool AutoPlacement = true;               // tự đo hình khối thật Tekla tạo ra rồi canh V và nẹp (khuyến nghị); tắt = dùng đúng các ô On plane/Rotation/At depth
         public bool FlipMiterCut = false;
 
+        /// <summary>Khoảng cách từ mép ngoài V (đường qua các điểm pick) tới mép ngoài của nẹp, đo vào trong khung.
+        /// Phải: nẹp sát cánh đứng (0). Trái: mép nẹp trùng đầu cánh nằm (legA - w). Giữa: nẹp giữa cánh nằm.</summary>
+        public double StripOffset()
+        {
+            if (StripPos == StripPosKind.Right) return 0;
+            if (StripPos == StripPosKind.Left) return VLegA - StripWidth;
+            return (VLegA - StripWidth) / 2;
+        }
+
         /// <summary>Kiểm tra dữ liệu nhập. Rỗng = hợp lệ.</summary>
         public List<string> Validate()
         {
@@ -65,7 +76,7 @@ namespace MeshFrame.Core
             if (UseStrip)
             {
                 if (StripWidth <= 0 || StripThk <= 0) e.Add("Kích thước nẹp phải > 0.");
-                else if (StripWidth <= MeshGap) e.Add("Bề rộng nẹp phải lớn hơn khoảng lùi lưới (nẹp phải đè lên mép lưới).");
+                else if (StripOffset() + StripWidth <= MeshGap) e.Add("Nẹp phải đè lên mép lưới: mép trong của nẹp phải nằm sâu hơn khoảng lùi lưới.");
             }
             if (StiffMode != StiffMode.None)
             {

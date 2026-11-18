@@ -36,12 +36,17 @@ namespace MeshFrame.Core
             double meshT = 2 * s.MeshWireDia;           // 2 lớp sợi đan
             double zStrip = -meshT;                      // mặt nẹp tiếp xúc lưới
 
-            CornerKind corner = s.Corner;
-            if (corner == CornerKind.OneThrough && n != 4)
+            // Kiểu nối góc "một cạnh chạy dài, một cạnh dừng": cạnh SONG SONG cạnh gốc chạy dài (đè qua góc),
+            // các cạnh còn lại dừng sát mặt trong; góc giữa hai cạnh cùng loại vẫn cắt vát.
+            bool[] through = null;
+            if (s.Corner == CornerKind.OneThrough)
             {
-                corner = CornerKind.Miter;
-                plan.Notes.Add("Kiểu 'một cạnh chạy suốt' chỉ dùng cho 4 điểm: dùng cắt vát.");
+                int bEdge = s.StiffBaseEdge >= 1 && s.StiffBaseEdge <= n ? s.StiffBaseEdge - 1 : LongestEdge(poly);
+                through = ThroughEdges(poly, bEdge);
+                int tc = 0; foreach (bool t in through) if (t) tc++;
+                plan.Notes.Add("Nối góc: " + tc + " cạnh chạy dài (song song cạnh " + (bEdge + 1) + "), " + (n - tc) + " cạnh dừng/cắt gọt.");
             }
+            double d0 = s.StripOffset();                 // nẹp phủ [d0, d0 + w] tính từ mép ngoài khung vào trong
 
             // ---------- Lưới: 1 tấm liên tục, lùi MeshGap so với mép ngoài khung
             V2[] meshPoly = Geo.Offset(poly, s.MeshGap);
@@ -61,38 +66,47 @@ namespace MeshFrame.Core
             for (int k = 0; k < n; k++)
             {
                 V2 a, b; V2? ca, cb;
-                EdgeEnds(poly, k, 0, 0, tV, corner, out a, out b, out ca, out cb);
+                EdgeEnds(poly, k, 0, 0, tV, through, out a, out b, out ca, out cb);
                 if ((b - a).Dot(poly[(k + 1) % n] - poly[k]) <= 1.0) { plan.Errors.Add("Cạnh " + (k + 1) + " quá ngắn so với V khung."); return plan; }
-                plan.Bars.Add(new PlanBar
+                var fbar = new PlanBar
                 {
                     Role = BarRole.Frame, Start = a, End = b, CutStart = ca, CutEnd = cb,
                     LegA = s.VLegA, LegB = s.VLegB, Thk = tV, ZRef = 0,
                     Material = s.VMaterial, Name = s.VName, Class = s.VClass, Prefix = s.VPrefix, StartNo = s.VStartNo, ProfileOverride = s.VProfile
-                });
+                };
+                if (through != null)
+                {
+                    // Đầu dừng sát cạnh chạy dài: cánh nằm khuyết phần chồng với cánh nằm của cạnh chạy dài
+                    int kp = (k + n - 1) % n, kn = (k + 1) % n;
+                    V2 dir = (b - a).Unit(), nl = dir.Left();
+                    if (!through[k] && through[kp]) fbar.Notches.Add(NotchQuad(poly, a, dir, nl, kp, tV, s.VLegA));
+                    if (!through[k] && through[kn]) fbar.Notches.Add(NotchQuad(poly, b, dir, nl, kn, tV, s.VLegA));
+                }
+                plan.Bars.Add(fbar);
             }
 
             // ---------- Nẹp quanh khung: PL nằm dưới cánh nằm V (ngoài lưới), mép ngoài trùng mép ngoài V, rộng StripWidth
             if (s.UseStrip)
             {
-                V2[] ringIn = Geo.Offset(poly, w);
-                if (!Geo.OffsetValid(poly, ringIn)) { plan.Errors.Add("Khung quá nhỏ hoặc hẹp so với nẹp (bề rộng nẹp " + F(w) + ")."); return plan; }
+                V2[] ringIn = Geo.Offset(poly, d0 + w);
+                if (!Geo.OffsetValid(poly, ringIn)) { plan.Errors.Add("Khung quá nhỏ hoặc hẹp so với nẹp (nẹp phủ tới " + F(d0 + w) + " mm tính từ mép ngoài)."); return plan; }
                 for (int k = 0; k < n; k++)
                 {
                     V2 a, b; V2? ca, cb;
-                    EdgeEnds(poly, k, w / 2, 0, w, corner, out a, out b, out ca, out cb);
+                    EdgeEnds(poly, k, d0 + w / 2, d0, d0 + w, through, out a, out b, out ca, out cb);
                     if ((b - a).Dot(poly[(k + 1) % n] - poly[k]) <= 1.0) { plan.Errors.Add("Cạnh " + (k + 1) + " quá ngắn so với nẹp."); return plan; }
                     plan.Strips.Add(NewStrip(s, a, b, ca, cb, zStrip, false));
                 }
             }
 
             // ---------- Gia cường
-            AddStiffeners(plan, s, poly, tV, zStrip);
+            AddStiffeners(plan, s, poly, tV, zStrip, d0);
             WarnLimits(plan, s, poly);
             return plan;
         }
 
         // ---------------------------------------------------------------- gia cường
-        private static void AddStiffeners(MeshFramePlan plan, MeshFrameSettings s, V2[] poly, double tV, double zStrip)
+        private static void AddStiffeners(MeshFramePlan plan, MeshFrameSettings s, V2[] poly, double tV, double zStrip, double d0)
         {
             if (s.StiffMode == StiffMode.None) { plan.Notes.Add("Gia cường: không dùng."); return; }
             int n = poly.Length;
@@ -120,7 +134,7 @@ namespace MeshFrame.Core
             double w = s.StripWidth, legA = s.VLegA;
             V2[] Q = Geo.Offset(poly, tV);                              // mặt trong cánh đứng V khung
             if (!Geo.OffsetValid(poly, Q)) { plan.Errors.Add("Khung quá nhỏ hoặc hẹp để đặt gia cường."); return; }
-            V2[] R = s.UseStrip ? Geo.Offset(poly, w) : null;            // mép trong nẹp chu vi
+            V2[] R = s.UseStrip ? Geo.Offset(poly, d0 + w) : null;       // mép trong nẹp chu vi
             if (R != null && !Geo.OffsetValid(poly, R)) R = null;
 
             double minLen = 2 * legA;                                    // ngắn hơn thì hai khuyết chiếm hết
@@ -153,8 +167,8 @@ namespace MeshFrame.Core
                 }
                 if (R != null)
                 {
-                    // Nẹp PL nằm ngay dưới cánh nằm gia cường: phủ offset [0, w] về phía +u; tim cách đường chia w/2.
-                    V2 O2 = O + u * (w / 2);
+                    // Nẹp PL nằm ngay dưới cánh nằm gia cường: phủ offset [d0, d0 + w] về phía +u (d0 theo vị trí nẹp Giữa/Trái/Phải).
+                    V2 O2 = O + u * (d0 + w / 2);
                     foreach (Geo.LineSeg seg in Geo.ClipLine(R, O2, perp))
                     {
                         V2 na = O2 + perp * seg.T0, nb = O2 + perp * seg.T1;
@@ -235,7 +249,14 @@ namespace MeshFrame.Core
             foreach (double d in parsed) sum += d;
             if (sum > total + 0.5)
             {
-                plan.Errors.Add("Tổng bề rộng các ô (" + F(sum) + ") lớn hơn kích thước khung dọc cạnh gốc (" + F(total) + ").");
+                // Không khóa kích thước: ô vượt mép khung thì cắt ở mép khung, phần dư bỏ.
+                double cum = 0; int used = 0;
+                foreach (double d in parsed)
+                {
+                    if (total - cum <= 0.5) break;
+                    res.Add(Math.Min(d, total - cum)); cum += d; used++;
+                }
+                plan.Warnings.Add("Tổng bề rộng các ô (" + F(sum) + ") lớn hơn kích thước khung dọc cạnh gốc (" + F(total) + "): cắt ở mép khung, dùng " + used + "/" + parsed.Count + " ô.");
                 return res;
             }
             res.AddRange(parsed);
@@ -259,30 +280,48 @@ namespace MeshFrame.Core
         }
 
         // ---------------------------------------------------------------- thanh quanh khung
+        /// <summary>Các cạnh song song cạnh gốc (kể cả chính nó): những cạnh này chạy dài ở kiểu nối "một chạy dài, một dừng".</summary>
+        private static bool[] ThroughEdges(V2[] poly, int baseEdge)
+        {
+            int n = poly.Length;
+            V2 u = (poly[(baseEdge + 1) % n] - poly[baseEdge]).Unit();
+            var t = new bool[n];
+            for (int k = 0; k < n; k++)
+            {
+                V2 d = (poly[(k + 1) % n] - poly[k]).Unit();
+                t[k] = Math.Abs(u.X * d.Y - u.Y * d.X) < 1e-6;
+            }
+            return t;
+        }
+
         /// <summary>
-        /// Đầu mút của thanh dọc cạnh k.  c = khoảng dịch của đường tham chiếu;
-        /// a = đường (của cạnh kề) mà thanh "chạy suốt" kết thúc;  b = đường mà thanh "bị cắt ngắn" kết thúc.
+        /// Đầu mút của thanh dọc cạnh k.  c = khoảng dịch của đường tham chiếu (vào trong khung).
+        /// through == null: cắt vát mọi góc. Ngược lại, tại góc giữa cạnh chạy dài và cạnh dừng:
+        /// cạnh chạy dài kết thúc ở đường offset a của cạnh kề (mép ngoài), cạnh dừng kết thúc ở đường offset b của cạnh kề (mặt trong).
+        /// Góc giữa hai cạnh cùng loại vẫn cắt vát.
         /// </summary>
-        private static void EdgeEnds(V2[] poly, int k, double c, double a, double b, CornerKind kind,
+        private static void EdgeEnds(V2[] poly, int k, double c, double a, double b, bool[] through,
                                      out V2 s, out V2 e, out V2? cutS, out V2? cutE)
         {
             int n = poly.Length, kp = (k + n - 1) % n, kn = (k + 1) % n;
-            V2 o, d;
-            Geo.OffsetLine(poly, k, c, out o, out d);
-            if (kind == CornerKind.Miter)
+            Vertex(poly, k, kp, k, c, a, b, through, out s, out cutS);
+            Vertex(poly, k, kn, kn, c, a, b, through, out e, out cutE);
+        }
+
+        private static void Vertex(V2[] poly, int k, int other, int vertex, double c, double a, double b, bool[] through, out V2 pt, out V2? cut)
+        {
+            if (through == null || through[k] == through[other])
             {
                 V2[] q = Geo.Offset(poly, c);
-                s = q[k]; e = q[kn];
-                cutS = Geo.Bisector(poly, k); cutE = Geo.Bisector(poly, kn);
+                pt = q[vertex]; cut = Geo.Bisector(poly, vertex);
                 return;
             }
-            double clr = (k % 2 == 0) ? a : b;          // cạnh chẵn chạy suốt, cạnh lẻ cắt ngắn (chỉ 4 điểm)
-            V2 op, dp, on, dn;
-            Geo.OffsetLine(poly, kp, clr, out op, out dp);
-            Geo.OffsetLine(poly, kn, clr, out on, out dn);
-            Geo.Intersect(o, d, op, dp, out s);
-            Geo.Intersect(o, d, on, dn, out e);
-            cutS = null; cutE = null;
+            double clr = through[k] ? a : b;
+            V2 o, d, op, dp;
+            Geo.OffsetLine(poly, k, c, out o, out d);
+            Geo.OffsetLine(poly, other, clr, out op, out dp);
+            Geo.Intersect(o, d, op, dp, out pt);
+            cut = null;
         }
 
         private static PlanStrip NewStrip(MeshFrameSettings s, V2 a, V2 b, V2? ca, V2? cb, double z, bool onStiff)

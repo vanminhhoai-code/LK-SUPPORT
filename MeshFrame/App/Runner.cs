@@ -77,7 +77,10 @@ namespace MeshFrame.App
 
             using (var dlg = new MeshFrameDialog())
             {
-                dlg.Text = title;
+                dlg.Text = "MESHFRAME " + AppInfo.Version + " - Tekla " + release;
+                string modelName = "";
+                try { string mp = TeklaFrameStore.ModelFolder(api, model).TrimEnd('\\', '/'); modelName = Path.GetFileName(mp); } catch (Exception) { }
+                dlg.SetConnection(release, "API đã nạp từ Tekla", modelName, true);
                 dlg.Settings = SettingsStore.Load(SettingsPath);
                 dlg.PickHandler = pick;
                 dlg.SelectedObjectProbe = delegate { return TeklaProbe.DumpSelected(api); };

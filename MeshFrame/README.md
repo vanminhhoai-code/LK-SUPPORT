@@ -33,3 +33,11 @@ Trạng thái kiểm chứng: API tạo model đã đối chiếu **2021 và 202
 
 ## Nhập vào Cover Tool
 `TeklaApi` cùng kiểu `Call/Get/Set` của `SdkMetadata`: tạo từ assembly gateway đã nạp, gán `api.Invoke = SdkThread.Invoke`, truyền `model` của gateway vào `TeklaModelWriter(api, model)`. Gọi `MeshFrameBuilder.Build(settings, corners /*V3[4], GLOBAL*/, writer)`.
+
+## Bản 1.1.0
+- Giao diện tối kiểu Cover Tool (UI/UiTheme.cs là bản sao nguyên vẹn của Cover Tool 1.7.128, không sửa; UI/CoverUiHost.cs là phần chủ tối thiểu; font Inter ở Fonts/). Thanh đầu trang: số phiên bản, bản Tekla, model, trạng thái kết nối.
+- Xem trước 3D thật (UI/Preview3D.cs + Core/Model3D.cs): đúng tiết diện chữ L, cắt vát, khuyết, nẹp, lưới. Cuộn = zoom; giữ chuột giữa kéo = kéo hình; Ctrl + chuột giữa = xoay; nút 3D / Trên / Dưới / Vừa khung; hộp "Mặt bằng 2D" để xem số cạnh.
+- Tab Nẹp: vị trí nẹp so với V (Giữa / Trái / Phải theo bề rộng cánh nằm).
+- Tab Khung V: kiểu nối góc "Cắt vát 45°" hoặc "Một cạnh chạy dài, một cạnh dừng" (cạnh song song cạnh gốc chạy dài, cạnh còn lại dừng sát mặt trong + khuyết cánh nằm), dùng cho đa giác bất kỳ.
+- Tổng ô nhập tay lớn hơn kích thước khung: chỉ cảnh báo, cắt ở mép khung, không khóa nút Tạo khung.
+- Vòng kín trong Tekla: sau khi tạo, đo lại hình khối thật của TỪNG thanh V và nẹp (Solid.Intersect), dời thanh lệch về đúng vị trí kế hoạch, ghi số đo trong kết quả. CHƯA chạy thử trên Tekla thật.

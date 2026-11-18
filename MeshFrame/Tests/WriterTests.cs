@@ -170,7 +170,8 @@ static class WriterTests
         w = new TeklaModelWriter(api, null) { FrameId = "auto1" };
         r = MeshFrameBuilder.Build(new MeshFrameSettings { StiffMode = StiffMode.None }, corners, w);
         Check("tu canh: build ok, khong canh bao", r.Success && w.Messages.Count == 0);
-        Check("tu canh: V xoay BELOW (thu FRONT, TOP, BACK roi BELOW), nep xoay TOP; ghi chu ro", w.Notes.Count == 1 && w.Notes[0].Contains("V xoay BELOW") && w.Notes[0].Contains("nẹp xoay TOP"));
+        Check("tu canh: V xoay BELOW (thu FRONT, TOP, BACK roi BELOW), nep xoay TOP; ghi chu ro", w.Notes.Count == 2 && w.Notes[0].Contains("V xoay BELOW") && w.Notes[0].Contains("nẹp xoay TOP"));
+        Check("do lai tren thanh that: do du 8 thanh, khong can doi, con 0", w.Notes[1].Contains("Đo lại trên hình khối thật: 8/8") && w.Notes[1].Contains("dời 0 thanh") && w.Notes[1].Contains("còn 0 mm"));
         Check("tu canh: thanh mau bi xoa het (4 V + 2 nep mau), thanh that giu nguyen", Count("Insert Beam") == 8 + 6 && Count("Delete Beam") == 6 && FakeLog.Beams.Count == 8);
         Solid sv = FakeLog.Beams[0].GetSolid();                          // V khung dau tien, doc theo +X
         Check("tu canh: V that chiem y 0..25 (tu mep ngoai vao trong) va z 0..25", Math.Abs(sv.MinimumPoint.Y) < 1e-6 && Math.Abs(sv.MaximumPoint.Y - 25) < 1e-6 && Math.Abs(sv.MinimumPoint.Z) < 1e-6 && Math.Abs(sv.MaximumPoint.Z - 25) < 1e-6);
@@ -209,8 +210,35 @@ static class WriterTests
         Reset(); FakeLog.NoSolid = true;
         w = new TeklaModelWriter(api, null);
         r = MeshFrameBuilder.Build(new MeshFrameSettings { StiffMode = StiffMode.None }, corners, w);
-        Check("khong do duoc hinh khoi: van tao bang thong so + canh bao ro", r.Success && w.Messages.Count == 1 && w.Messages[0].Contains("Không đo được hình khối") && w.Messages[0].Contains("có thể lệch") && w.Notes.Count == 0);
+        Check("khong do duoc hinh khoi: van tao bang thong so + canh bao ro", r.Success && w.Messages.Count == 2 && w.Messages[0].Contains("Không đo được hình khối") && w.Messages[0].Contains("có thể lệch") && w.Messages[1].Contains("chưa được kiểm chứng") && w.Notes.Count == 0);
+
+
         Check("khong do duoc: thanh mau van bi xoa, thanh that van du", Count("Insert Beam") == 8 + 1 && Count("Delete Beam") == 1 && FakeLog.Beams.Count == 8);
+
+        // VÒNG KÍN: thanh mẫu không đại diện (mọi thanh thật bị lệch 1.5 mm) -> đo trên thanh thật, dời, đo lại; mọi hướng thanh
+        Reset(); FakeLog.Bias = 1.5;
+        w = new TeklaModelWriter(api, null);
+        r = MeshFrameBuilder.Build(new MeshFrameSettings { StiffMode = StiffMode.None }, corners, w);
+        Check("vong kin: phat hien lech 1.5 mm tren 8 thanh, doi, con 0", r.Success && w.Messages.Count == 0 && w.Notes.Any(x => x.Contains("Đo lại trên hình khối thật: 8/8") && x.Contains("dời 8 thanh") && x.Contains("lệch lớn nhất 1.5 mm") && x.Contains("còn 0 mm")));
+        {
+            bool all = true; int idx = 0;
+            foreach (var bm in FakeLog.Beams)
+            {
+                bool isV = idx < r.Plan.Bars.Count;
+                V2 ps = isV ? r.Plan.Bars[idx].Start : r.Plan.Strips[idx - r.Plan.Bars.Count].Start, pe = isV ? r.Plan.Bars[idx].End : r.Plan.Strips[idx - r.Plan.Bars.Count].End;
+                V2 dd = (pe - ps).Unit(), nn = dd.Left(), md = (ps + pe) * 0.5;
+                Solid sd = bm.GetSolid();
+                double zz = isV ? 1.0 : -1.34;
+                var hit = sd.Intersect(new Tekla.Structures.Geometry3d.Point(md.X - nn.X * 40, md.Y - nn.Y * 40, zz), new Tekla.Structures.Geometry3d.Point(md.X + nn.X * 40, md.Y + nn.Y * 40, zz));
+                double lo = double.MaxValue, hi = double.MinValue;
+                foreach (Tekla.Structures.Geometry3d.Point q in hit) { double l = (q.X - md.X) * nn.X + (q.Y - md.Y) * nn.Y; lo = Math.Min(lo, l); hi = Math.Max(hi, l); }
+                // V: cánh nằm [0, 25] so với đường tham chiếu của kế hoạch; nẹp: [-12.5, 12.5] quanh đường tim
+                all &= hit.Count >= 2 && Math.Abs(lo - (isV ? 0 : -12.5)) < 1e-6 && Math.Abs(hi - (isV ? 25 : 12.5)) < 1e-6;
+                idx++;
+            }
+            Check("vong kin: sau khi doi moi V (0..25) va nep (-12.5..12.5) dung vi tri ke hoach", all);
+        }
+        FakeLog.Bias = 0;
         // tu canh tat -> khong co thanh mau
         Reset();
         MeshFrameBuilder.Build(new MeshFrameSettings { StiffMode = StiffMode.None, AutoPlacement = false }, corners, new TeklaModelWriter(api, null));

@@ -9,6 +9,7 @@ namespace Tekla.Structures.Model
     public static class FakeLog
     {
         public static readonly List<string> Entries = new List<string>();
+        public static double Bias;   // lệch ngang giả của mọi thanh thật (không phải thanh mẫu)
         public static bool RejectInsert, RejectRebarMesh, RejectPolygonMesh, NonAsciiPrompt, NoSolid, NullAssembly;
         public static int SectionTurn;                                                    // xoay thêm tiết diện giả (độ) để thử quy ước đặt khác
         public static int FailBeamAt = -1, BeamCount, PickFailAt = -1, Picked;
@@ -24,7 +25,7 @@ namespace Tekla.Structures.Model
         public static void Add(string s) { Entries.Add(s); }
         public static void Reset()
         {
-            Entries.Clear(); BeamPositions.Clear(); BeamStarts.Clear(); Beams.Clear(); SectionTurn = 0; NoSolid = false; NullAssembly = false; Meshes.Clear(); Prompts.Clear(); Uda.Clear(); Selected.Clear();
+            Bias = 0; Entries.Clear(); BeamPositions.Clear(); BeamStarts.Clear(); Beams.Clear(); SectionTurn = 0; NoSolid = false; NullAssembly = false; Meshes.Clear(); Prompts.Clear(); Uda.Clear(); Selected.Clear();
             RejectInsert = RejectRebarMesh = RejectPolygonMesh = false; FailBeamAt = -1; BeamCount = 0;
         }
     }
@@ -98,14 +99,17 @@ namespace Tekla.Structures.Model
     {
         public Point MinimumPoint { get; set; }
         public Point MaximumPoint { get; set; }
-        internal List<double[]> Poly = new List<double[]>();   // (y, z) tuyệt đối
-        internal double X0, X1;
+        internal List<double[]> Poly = new List<double[]>();   // (ngang, z): ngang đo từ đường qua điểm đầu, theo pháp tuyến TRÁI của hướng thanh
+        internal double Ox, Oy, Dx = 1, Dy = 0, L;
 
         public ArrayList Intersect(Point p1, Point p2)
         {
             var res = new ArrayList();
-            if (p1.X < X0 - 1e-9 || p1.X > X1 + 1e-9) return res;
-            double dy = p2.Y - p1.Y, dz = p2.Z - p1.Z;
+            double nx = -Dy, ny = Dx;
+            double along = (p1.X - Ox) * Dx + (p1.Y - Oy) * Dy;
+            if (along < -1e-9 || along > L + 1e-9) return res;
+            double l1 = (p1.X - Ox) * nx + (p1.Y - Oy) * ny, l2 = (p2.X - Ox) * nx + (p2.Y - Oy) * ny;
+            double dy = l2 - l1, dz = p2.Z - p1.Z;
             var hits = new List<double[]>();
             for (int i = 0; i < Poly.Count; i++)
             {
@@ -113,11 +117,11 @@ namespace Tekla.Structures.Model
                 double fy = b[0] - a[0], fz = b[1] - a[1];
                 double den = dy * fz - dz * fy;
                 if (System.Math.Abs(den) < 1e-12) continue;
-                double t = ((a[0] - p1.Y) * fz - (a[1] - p1.Z) * fy) / den, u = ((a[0] - p1.Y) * dz - (a[1] - p1.Z) * dy) / den;
-                if (t >= 0 && t <= 1 && u >= 0 && u <= 1) hits.Add(new[] { t, p1.Y + t * dy, p1.Z + t * dz });
+                double t = ((a[0] - l1) * fz - (a[1] - p1.Z) * fy) / den, u = ((a[0] - l1) * dz - (a[1] - p1.Z) * dy) / den;
+                if (t >= 0 && t <= 1 && u >= 0 && u <= 1) hits.Add(new[] { t, l1 + t * dy, p1.Z + t * dz });
             }
             hits.Sort((h1, h2) => h1[0].CompareTo(h2[0]));
-            foreach (double[] h in hits) res.Add(new Point(p1.X, h[1], h[2]));
+            foreach (double[] h in hits) res.Add(new Point(Ox + Dx * along + nx * h[1], Oy + Dy * along + ny * h[1], h[2]));
             return res;
         }
     }
@@ -158,16 +162,24 @@ namespace Tekla.Structures.Model
                 y0 = System.Math.Min(y0, y); y1 = System.Math.Max(y1, y); z0 = System.Math.Min(z0, z); z1 = System.Math.Max(z1, z);
             }
             double dy = Position.Plane == Position.PlaneEnum.MIDDLE ? -(y0 + y1) / 2 : Position.Plane == Position.PlaneEnum.LEFT ? -y1 : -y0;
+            if (Name != "MF_CALIB") dy += FakeLog.Bias;
             double dz = Position.Depth == Position.DepthEnum.MIDDLE ? -(z0 + z1) / 2 : Position.Depth == Position.DepthEnum.FRONT ? -z1 : -z0;
-            var s = new Solid { X0 = System.Math.Min(StartPoint.X, EndPoint.X), X1 = System.Math.Max(StartPoint.X, EndPoint.X) };
-            double miny = double.MaxValue, maxy = double.MinValue, minz = double.MaxValue, maxz = double.MinValue;
+            double ddx = EndPoint.X - StartPoint.X, ddy = EndPoint.Y - StartPoint.Y, len = System.Math.Sqrt(ddx * ddx + ddy * ddy);
+            var s = new Solid { Ox = StartPoint.X, Oy = StartPoint.Y, Dx = ddx / len, Dy = ddy / len, L = len };
+            double minlat = double.MaxValue, maxlat = double.MinValue, minz = double.MaxValue, maxz = double.MinValue;
             foreach (double[] p in sec)
             {
-                double y = p[0] + dy + StartPoint.Y, z = p[1] + dz + StartPoint.Z;
-                s.Poly.Add(new[] { y, z });
-                miny = System.Math.Min(miny, y); maxy = System.Math.Max(maxy, y); minz = System.Math.Min(minz, z); maxz = System.Math.Max(maxz, z);
+                double lat = p[0] + dy, z = p[1] + dz + StartPoint.Z;
+                s.Poly.Add(new[] { lat, z });
+                minlat = System.Math.Min(minlat, lat); maxlat = System.Math.Max(maxlat, lat); minz = System.Math.Min(minz, z); maxz = System.Math.Max(maxz, z);
             }
-            s.MinimumPoint = new Point(s.X0, miny, minz); s.MaximumPoint = new Point(s.X1, maxy, maxz);
+            double mnx = double.MaxValue, mny = double.MaxValue, mxx = double.MinValue, mxy = double.MinValue;
+            foreach (double al in new[] { 0.0, len }) foreach (double la in new[] { minlat, maxlat })
+            {
+                double x = StartPoint.X + s.Dx * al - s.Dy * la, y = StartPoint.Y + s.Dy * al + s.Dx * la;
+                mnx = System.Math.Min(mnx, x); mxx = System.Math.Max(mxx, x); mny = System.Math.Min(mny, y); mxy = System.Math.Max(mxy, y);
+            }
+            s.MinimumPoint = new Point(mnx, mny, minz); s.MaximumPoint = new Point(mxx, mxy, maxz);
             return s;
         }
     }

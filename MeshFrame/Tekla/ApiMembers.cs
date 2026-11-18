@@ -17,6 +17,7 @@ call Tekla.Structures.Model.Beam::GetAssembly()
 call Tekla.Structures.Model.Beam::GetSolid()
 call Tekla.Structures.Model.Beam::GetUserProperty(System.String;System.String&)
 call Tekla.Structures.Model.Beam::Insert()
+call Tekla.Structures.Model.Beam::Modify()
 call Tekla.Structures.Model.Beam::SetUserProperty(System.String;System.String)
 call Tekla.Structures.Model.BooleanPart::Insert()
 call Tekla.Structures.Model.BooleanPart::SetOperativePart(Tekla.Structures.Model.ContourPlate>Tekla.Structures.Model.Part>Tekla.Structures.Model.ModelObject>Tekla.Structures.Model.IAssemblable)
@@ -60,10 +61,12 @@ get Tekla.Structures.Geometry3d.Point::X
 get Tekla.Structures.Geometry3d.Point::Y
 get Tekla.Structures.Geometry3d.Point::Z
 get Tekla.Structures.Model.Assembly::AssemblyNumber
+get Tekla.Structures.Model.Beam::EndPoint
 get Tekla.Structures.Model.Beam::Material
 get Tekla.Structures.Model.Beam::PartNumber
 get Tekla.Structures.Model.Beam::Position
 get Tekla.Structures.Model.Beam::Profile
+get Tekla.Structures.Model.Beam::StartPoint
 get Tekla.Structures.Model.ContourPlate::Material
 get Tekla.Structures.Model.ContourPlate::PartNumber
 get Tekla.Structures.Model.ContourPlate::Position
@@ -96,7 +99,9 @@ new Tekla.Structures.Model.UI.GraphicsDrawer()
 new Tekla.Structures.Model.UI.ModelObjectSelector()
 new Tekla.Structures.Model.UI.Picker()
 set Tekla.Structures.Model.Beam::Class=System.String
+set Tekla.Structures.Model.Beam::EndPoint=Tekla.Structures.Geometry3d.Point
 set Tekla.Structures.Model.Beam::Name=System.String
+set Tekla.Structures.Model.Beam::StartPoint=Tekla.Structures.Geometry3d.Point
 set Tekla.Structures.Model.BooleanPart::Father=Tekla.Structures.Model.Beam>Tekla.Structures.Model.Part>Tekla.Structures.Model.ModelObject>Tekla.Structures.Model.IAssemblable
 set Tekla.Structures.Model.ContourPlate::Class=System.String
 set Tekla.Structures.Model.ContourPlate::Name=System.String

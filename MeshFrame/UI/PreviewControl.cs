@@ -18,7 +18,7 @@ namespace MeshFrame.UI
         public PreviewControl()
         {
             DoubleBuffered = true;
-            BackColor = Color.White;
+            BackColor = Color.FromArgb(27, 28, 32);
         }
 
         /// <param name="plan">Kế hoạch (null nếu có lỗi: chỉ vẽ viền đa giác).</param>
@@ -38,7 +38,7 @@ namespace MeshFrame.UI
             g.SmoothingMode = SmoothingMode.AntiAlias;
             if (_poly == null || _poly.Length < 3)
             {
-                using (var f = new Font("Segoe UI", 10f)) g.DrawString(_empty, f, Brushes.Gray, 20, 20);
+                using (var f = new Font("Segoe UI", 10f)) g.DrawString(_empty, f, Brushes.Silver, 20, 20);
                 return;
             }
 
@@ -79,7 +79,7 @@ namespace MeshFrame.UI
             foreach (PlanStrip s in _plan.Strips)
                 FillBand(g, T, s.Start, s.End, -s.Width / 2, s.Width / 2, Color.FromArgb(200, 39, 174, 96));
 
-            using (var pen = new Pen(Color.FromArgb(60, 60, 60), 1.2f)) g.DrawPolygon(pen, TA(_poly));
+            using (var pen = new Pen(Color.FromArgb(150, 158, 170), 1.2f)) g.DrawPolygon(pen, TA(_poly));
             DrawLabels(g, T);
         }
 
@@ -106,7 +106,7 @@ namespace MeshFrame.UI
                     var sz = g.MeasureString(txt, fs);
                     float dx = (float)outDir.X * (sz.Width / 2 + 6), dy = -(float)outDir.Y * (sz.Height / 2 + 4);
                     float lx = Math.Max(2, Math.Min(Width - sz.Width - 2, m.X + dx - sz.Width / 2)), ly = Math.Max(2, Math.Min(Height - sz.Height - 2, m.Y + dy - sz.Height / 2));
-                    g.DrawString(txt, fs, i == baseEdge ? Brushes.DarkOrange : Brushes.DimGray, lx, ly);
+                    g.DrawString(txt, fs, i == baseEdge ? Brushes.DarkOrange : Brushes.Silver, lx, ly);
                 }
             }
         }

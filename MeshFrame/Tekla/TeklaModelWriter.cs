@@ -68,6 +68,7 @@ namespace MeshFrame.Tekla
                 }
                 if (bars.Count == 0) return;
                 MainPart = bars[0];
+                if (P.AutoPlacement) Verify(plan, bars, strips);       // đo lại trên CHÍNH các thanh vừa tạo, dời nếu lệch
 
                 object meshPart = null;
                 if (plan.Mesh != null)
@@ -190,6 +191,7 @@ namespace MeshFrame.Tekla
             {
                 Describe(beam, profile, material, "MF_CALIB", "0", "X", 1, "MIDDLE", rotation, "MIDDLE");
                 A.Require(beam, "Insert", "thanh mẫu " + profile);
+                A.Call(_model, "CommitChanges");
                 object solid = A.Call(beam, "GetSolid");
                 if (solid == null) throw new InvalidOperationException("Tekla không trả về hình khối của thanh mẫu.");
                 object mn = A.Get(solid, "MinimumPoint"), mx = A.Get(solid, "MaximumPoint");
@@ -251,6 +253,123 @@ namespace MeshFrame.Tekla
                 if (c != null) return c;
             }
             return null;
+        }
+
+        // ------------------------------------------------------------------ đo lại trên các thanh vừa tạo (vòng kín)
+        private sealed class Offs { public double Lat, Z; }
+
+        /// <summary>Các toạ độ (ngang theo n, hoặc z) của giao điểm giữa đoạn thăm dò và hình khối thật; rỗng nếu không trúng.</summary>
+        private List<double> Probe(object solid, V2 origin, V2 n, double lat1, double z1, double lat2, double z2, bool wantLat)
+        {
+            V2 a = origin + n * lat1, b = origin + n * lat2;
+            IList pts = A.Call(solid, "Intersect", A.Point(a.X, a.Y, z1), A.Point(b.X, b.Y, z2)) as IList;
+            var res = new List<double>();
+            if (pts == null) return res;
+            foreach (object p in pts)
+            {
+                if (wantLat) res.Add((new V2(A.GetDouble(p, "X"), A.GetDouble(p, "Y")) - origin).Dot(n));
+                else res.Add(A.GetDouble(p, "Z"));
+            }
+            return res;
+        }
+
+        private static void MinMax(List<double> v, out double lo, out double hi)
+        {
+            lo = double.MaxValue; hi = double.MinValue;
+            foreach (double d in v) { lo = Math.Min(lo, d); hi = Math.Max(hi, d); }
+        }
+
+        /// <summary>Đo cánh nằm (ngang) và cánh đứng của V tại giữa thanh. Trả về độ lệch so với kế hoạch, hoặc null + lý do.</summary>
+        private Offs MeasureBar(PlanBar b, object beam, out string why)
+        {
+            why = null;
+            V2 d = (b.End - b.Start).Unit(), n = d.Left(), mid = (b.Start + b.End) * 0.5;
+            object solid = A.Call(beam, "GetSolid");
+            if (solid == null) { why = "Tekla không trả về hình khối"; return null; }
+            double t = b.Thk, e = 30;
+            // 1) tia đứng qua giữa cánh nằm -> cao độ cánh nằm;  2) tia ngang giữa độ dày cánh nằm -> mép ngang;  3) tia đứng qua cánh đứng -> chiều cao
+            List<double> v0 = Probe(solid, mid, n, b.LegA / 2, b.ZRef - e, b.LegA / 2, b.ZRef + b.LegB + e, false);
+            if (v0.Count < 2) { why = "đường thăm dò không trúng hình khối"; return null; }
+            double z0, z1; MinMax(v0, out z0, out z1);
+            List<double> h = Probe(solid, mid, n, -e, (z0 + z1) / 2, b.LegA + e, (z0 + z1) / 2, true);
+            if (h.Count < 2) { why = "đường thăm dò không trúng hình khối"; return null; }
+            double lo, hi; MinMax(h, out lo, out hi);
+            List<double> v = Probe(solid, mid, n, lo + t / 2, b.ZRef - e, lo + t / 2, b.ZRef + b.LegB + e, false);
+            if (v.Count < 2) { why = "đường thăm dò không trúng hình khối"; return null; }
+            double zlo, zhi; MinMax(v, out zlo, out zhi);
+            if (Math.Abs((hi - lo) - b.LegA) > 1.0 || Math.Abs((zhi - zlo) - b.LegB) > 1.0)
+            { why = "tiết diện đo được " + F(hi - lo) + "x" + F(zhi - zlo) + " khác " + F(b.LegA) + "x" + F(b.LegB); return null; }
+            return new Offs { Lat = lo, Z = zlo - b.ZRef };
+        }
+
+        /// <summary>Đo nẹp tại giữa thanh: lệch tim ngang so với đường tim kế hoạch và lệch cao so với mặt tiếp xúc lưới.</summary>
+        private Offs MeasureStrip(PlanStrip st, object beam, out string why)
+        {
+            why = null;
+            V2 d = (st.End - st.Start).Unit(), n = d.Left(), mid = (st.Start + st.End) * 0.5;
+            object solid = A.Call(beam, "GetSolid");
+            if (solid == null) { why = "Tekla không trả về hình khối"; return null; }
+            double e = 30, w = st.Width, t = st.Thk;
+            List<double> v = Probe(solid, mid, n, 0, st.ZRef - t - e, 0, st.ZRef + e, false);
+            if (v.Count < 2) { why = "đường thăm dò không trúng hình khối"; return null; }
+            double zlo, zhi; MinMax(v, out zlo, out zhi);
+            List<double> h = Probe(solid, mid, n, -(w / 2 + e), (zlo + zhi) / 2, w / 2 + e, (zlo + zhi) / 2, true);
+            if (h.Count < 2) { why = "đường thăm dò không trúng hình khối"; return null; }
+            double lo, hi; MinMax(h, out lo, out hi);
+            if (Math.Abs((hi - lo) - w) > 1.0 || Math.Abs((zhi - zlo) - t) > 1.0)
+            { why = "tiết diện đo được " + F(hi - lo) + "x" + F(zhi - zlo) + " khác " + F(w) + "x" + F(t); return null; }
+            return new Offs { Lat = (lo + hi) / 2, Z = zhi - st.ZRef };
+        }
+
+        /// <summary>Dời thanh: ngang theo n (mm) và theo z (mm), rồi Modify.</summary>
+        private void Shift(object beam, V2 n, double dLat, double dZ)
+        {
+            object sp = A.Get(beam, "StartPoint"), ep = A.Get(beam, "EndPoint");
+            A.Set(beam, "StartPoint", A.Point(A.GetDouble(sp, "X") + n.X * dLat, A.GetDouble(sp, "Y") + n.Y * dLat, A.GetDouble(sp, "Z") + dZ));
+            A.Set(beam, "EndPoint", A.Point(A.GetDouble(ep, "X") + n.X * dLat, A.GetDouble(ep, "Y") + n.Y * dLat, A.GetDouble(ep, "Z") + dZ));
+            A.Call(beam, "Modify");
+        }
+
+        /// <summary>Vòng kín: đo hình khối THẬT của từng V và nẹp vừa tạo (cánh nằm, cánh đứng, nẹp), dời cho đúng vị trí kế hoạch
+        /// (nẹp so với V theo Giữa / Trái / Phải) rồi đo lại. Báo số đo trong kết quả.</summary>
+        private void Verify(MeshFramePlan plan, List<object> bars, List<object> strips)
+        {
+            try
+            {
+                A.Call(_model, "CommitChanges");
+                int total = bars.Count + strips.Count, measured = 0, moved = 0;
+                double before = 0, after = 0; string firstWhy = null;
+                for (int i = 0; i < total; i++)
+                {
+                    bool isBar = i < bars.Count;
+                    PlanBar b = isBar ? plan.Bars[i] : null; PlanStrip st = isBar ? null : plan.Strips[i - bars.Count];
+                    object beam = isBar ? bars[i] : strips[i - bars.Count];
+                    V2 n = isBar ? (b.End - b.Start).Unit().Left() : (st.End - st.Start).Unit().Left();
+                    string why;
+                    Offs o = isBar ? MeasureBar(b, beam, out why) : MeasureStrip(st, beam, out why);
+                    if (o == null) { if (firstWhy == null) firstWhy = (isBar ? "V " : "nẹp ") + (isBar ? i + 1 : i - bars.Count + 1) + ": " + why; continue; }
+                    measured++;
+                    double dev = Math.Max(Math.Abs(o.Lat), Math.Abs(o.Z));
+                    before = Math.Max(before, dev);
+                    if (dev > 0.05)
+                    {
+                        Shift(beam, n, -o.Lat, -o.Z); moved++;
+                        string why2;
+                        Offs o2 = isBar ? MeasureBar(b, beam, out why2) : MeasureStrip(st, beam, out why2);
+                        dev = o2 == null ? dev : Math.Max(Math.Abs(o2.Lat), Math.Abs(o2.Z));
+                    }
+                    after = Math.Max(after, dev);
+                }
+                if (measured == 0)
+                    Messages.Add("Không đo lại được hình khối thật của các thanh vừa tạo (" + firstWhy + "): vị trí V / nẹp chưa được kiểm chứng.");
+                else
+                {
+                    Notes.Add("Đo lại trên hình khối thật: " + measured + "/" + total + " thanh; dời " + moved + " thanh (lệch lớn nhất " + F(before) + " mm, sau khi dời còn " + F(after) + " mm).");
+                    if (measured < total) Messages.Add("Chưa đo được " + (total - measured) + " thanh (" + firstWhy + ").");
+                    if (after > 0.5) Messages.Add("Sau khi dời, một số thanh vẫn lệch tới " + F(after) + " mm so với kế hoạch.");
+                }
+            }
+            catch (Exception ex) { Messages.Add("Không đo lại được hình khối (" + Root(ex).GetType().Name + ": " + Root(ex).Message + "): vị trí V / nẹp chưa được kiểm chứng."); }
         }
 
         private static string F(double d) { return d.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture); }
